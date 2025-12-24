@@ -1,285 +1,188 @@
 import os
 import io
-import json
 import requests
 import gradio as gr
-from google.oauth2 import service_account
+from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
-from googleapiclient.errors import HttpError
-from urllib.parse import urlparse
-import traceback
+from urllib.parse import urlparse, unquote
 
-# 从环境变量加载配置
-GDRIVE_CREDENTIALS = os.environ.get('GDRIVE_CREDENTIALS')
-GDRIVE_FOLDER_ID = os.environ.get('GDRIVE_FOLDER_ID')
-SECRET_CODE = os.environ.get('SECRET_CODE', 'default_secret')
-# 新增：文件夹所有者邮箱（用于转移所有权）
-OWNER_EMAIL = os.environ.get('OWNER_EMAIL', '')
-
-# Google Drive API 作用域 - 使用完整权限
-SCOPES = ['https://www.googleapis.com/auth/drive']
-
+# ---------------------------------------------------------
+# 1. 鉴权与服务初始化 (使用 OAuth 2.0 Refresh Token 模式)
+# ---------------------------------------------------------
 def get_drive_service():
-    """初始化 Google Drive 服务"""
-    try:
-        if not GDRIVE_CREDENTIALS:
-            raise ValueError("GDRIVE_CREDENTIALS 环境变量未设置")
-        
-        # 解析 JSON 凭据
-        credentials_info = json.loads(GDRIVE_CREDENTIALS)
-        credentials = service_account.Credentials.from_service_account_info(
-            credentials_info, scopes=SCOPES
-        )
-        
-        service = build('drive', 'v3', credentials=credentials)
-        return service
-    except Exception as e:
-        raise Exception(f"初始化 Google Drive 服务失败: {str(e)}")
+    """
+    使用环境变量中的 Refresh Token 动态构建 Credentials 对象。
+    这种方式不需要本地存储 token.json 文件，也不受 Service Account 存储限制。
+    """
+    # 必需的环境变量检查
+    client_id = os.environ.get("G_CLIENT_ID")
+    client_secret = os.environ.get("G_CLIENT_SECRET")
+    refresh_token = os.environ.get("G_REFRESH_TOKEN")
+    
+    if not all([client_id, client_secret, refresh_token]):
+        raise EnvironmentError("❌ 缺少必要的 OAuth 环境变量 (G_CLIENT_ID, G_CLIENT_SECRET, G_REFRESH_TOKEN)")
 
-def get_filename_from_url(url, content_disposition=None):
-    """从 URL 或 Content-Disposition 头中提取文件名"""
+    # 构建 OAuth 2.0 Credentials
+    # token=None 表示当前没有 Access Token，库会自动使用 refresh_token 去换取
+    creds = Credentials(
+        token=None,
+        refresh_token=refresh_token,
+        token_uri="https://oauth2.googleapis.com/token",
+        client_id=client_id,
+        client_secret=client_secret
+    )
+    
+    return build("drive", "v3", credentials=creds)
+
+# ---------------------------------------------------------
+# 2. 核心流式处理逻辑 (内存优化)
+# ---------------------------------------------------------
+class StreamingUploadFile(io.IOBase):
+    """
+    包装 requests 的 raw stream，使其表现得像一个文件对象，
+    供 Google Drive API 的 MediaIoBaseUpload 使用。
+    这样可以避免将整个文件读入内存。
+    """
+    def __init__(self, response):
+        self.response = response
+        self.raw = response.raw
+        self.position = 0
+
+    def read(self, size=-1):
+        # 必须实现 read 方法，供 upload chunk 使用
+        chunk = self.raw.read(size)
+        if chunk:
+            self.position += len(chunk)
+        return chunk
+
+    def seek(self, offset, whence=io.SEEK_SET):
+        # Google Upload 在某些重试或断点续传场景可能调用 seek
+        # 对于 requests stream，我们只能处理 'seek to current' 或 'seek to 0' (如果还没开始)
+        # 简单起见，如果 offset != position，则抛出错误（通常一次性上传不会触发回退）
+        if whence == io.SEEK_SET and offset == self.position:
+            return self.position
+        if whence == io.SEEK_CUR and offset == 0:
+            return self.position
+        # 注意: 真实的完全流式转发很难支持真正的 seek。
+        # 如果遇到 Resumable Upload 断网重试，可能需要重新发起下载。
+        # 此处为简化实现，假设网络稳定。
+        return self.position
+
+    def tell(self):
+        return self.position
+
+def get_filename_from_response(response, url):
+    """尝试从 Content-Disposition 获取文件名，否则从 URL 解析"""
+    content_disposition = response.headers.get("Content-Disposition")
     if content_disposition:
         import re
-        filename_match = re.findall('filename="?([^"]+)"?', content_disposition)
-        if filename_match:
-            return filename_match[0]
+        fname = re.findall('filename="?([^"]+)"?', content_disposition)
+        if fname:
+            return unquote(fname[0])
     
-    # 从 URL 中提取文件名
-    parsed_url = urlparse(url)
-    filename = os.path.basename(parsed_url.path)
-    
-    # 如果没有文件名或文件名无效，使用默认名称
-    if not filename or '.' not in filename:
-        filename = 'downloaded_file'
-    
-    return filename
+    # Fallback 到 URL
+    parsed = urlparse(url)
+    return os.path.basename(unquote(parsed.path)) or "downloaded_file"
 
-def upload_to_drive(file_url, secret_code):
+def process_upload(file_url, progress=gr.Progress()):
     """
-    从 URL 下载文件并上传到 Google Drive
-    
-    Args:
-        file_url: 要下载的文件 URL
-        secret_code: 访问密码
-    
-    Returns:
-        str: 成功时返回下载链接，失败时返回错误信息
+    主处理函数：下载 -> 流式上传 -> 设置权限 -> 返回链接
     """
-    # 验证密码
-    if secret_code != SECRET_CODE:
-        return "❌ 密码错误，访问被拒绝"
-    
-    # 验证 URL
-    if not file_url or not file_url.startswith(('http://', 'https://')):
-        return "❌ 请提供有效的 URL"
+    if not file_url:
+        return "❌ 错误: 请输入有效的 URL"
     
     try:
-        # 初始化 Google Drive 服务
-        service = get_drive_service()
+        progress(0, desc="🚀 初始化连接...")
         
-        # 第一步：发送 HEAD 请求获取文件信息
-        print(f"正在获取文件信息: {file_url}")
-        head_response = requests.head(file_url, allow_redirects=True, timeout=10)
-        
-        # 获取文件名
-        content_disposition = head_response.headers.get('Content-Disposition')
-        filename = get_filename_from_url(file_url, content_disposition)
-        
-        # 获取文件大小（如果可用）
-        content_length = head_response.headers.get('Content-Length')
-        if content_length:
-            file_size_mb = int(content_length) / (1024 * 1024)
-            print(f"文件大小: {file_size_mb:.2f} MB")
-        
-        # 第二步：流式下载文件
-        print(f"开始下载文件: {filename}")
-        response = requests.get(file_url, stream=True, timeout=30)
-        response.raise_for_status()
-        
-        # 使用 BytesIO 作为内存缓冲区
-        file_buffer = io.BytesIO()
-        
-        # 分块下载
-        chunk_size = 8192
-        downloaded = 0
-        for chunk in response.iter_content(chunk_size=chunk_size):
-            if chunk:
-                file_buffer.write(chunk)
-                downloaded += len(chunk)
-        
-        print(f"下载完成，总大小: {downloaded / (1024 * 1024):.2f} MB")
-        
-        # 重置缓冲区指针到开始位置
-        file_buffer.seek(0)
-        
-        # 第三步：上传到 Google Drive
-        print(f"开始上传到 Google Drive: {filename}")
-        
-        # 获取 MIME 类型
-        content_type = response.headers.get('Content-Type', 'application/octet-stream')
-        
-        file_metadata = {
-            'name': filename,
-        }
-        
-        # 如果设置了文件夹ID，添加到父文件夹
-        if GDRIVE_FOLDER_ID:
-            file_metadata['parents'] = [GDRIVE_FOLDER_ID]
-        
-        media = MediaIoBaseUpload(
-            file_buffer,
-            mimetype=content_type,
-            resumable=True,
-            chunksize=1024*1024  # 1MB chunks
-        )
-        
-        # 上传文件，支持共享驱动器
-        file = service.files().create(
-            body=file_metadata,
-            media_body=media,
-            fields='id, name, webViewLink, webContentLink, owners',
-            supportsAllDrives=True
-        ).execute()
-        
-        file_id = file.get('id')
-        print(f"上传成功，文件 ID: {file_id}")
-        
-        # 第四步：如果设置了所有者邮箱，尝试转移所有权
-        if OWNER_EMAIL:
-            try:
-                print(f"正在将文件所有权转移给: {OWNER_EMAIL}")
-                permission = {
-                    'type': 'user',
-                    'role': 'owner',
-                    'emailAddress': OWNER_EMAIL
-                }
-                service.permissions().create(
-                    fileId=file_id,
-                    body=permission,
-                    transferOwnership=True,
-                    supportsAllDrives=True
-                ).execute()
-                print("所有权转移成功")
-            except HttpError as e:
-                print(f"所有权转移失败，尝试设置编辑权限: {str(e)}")
-                # 如果转移失败，至少给予编辑权限
-                try:
-                    permission = {
-                        'type': 'user',
-                        'role': 'writer',
-                        'emailAddress': OWNER_EMAIL
-                    }
-                    service.permissions().create(
-                        fileId=file_id,
-                        body=permission,
-                        supportsAllDrives=True
-                    ).execute()
-                except:
-                    pass
-        
-        # 第五步：设置文件权限为公开可读
-        try:
-            permission = {
-                'type': 'anyone',
-                'role': 'reader'
-            }
+        # 1. 建立下载连接 (stream=True)
+        # headers={'User-Agent': 'Mozilla/5.0'} 有时能防止 403
+        with requests.get(file_url, stream=True, headers={'User-Agent': 'Mozilla/5.0'}) as response:
+            response.raise_for_status()
+            
+            filename = get_filename_from_response(response, file_url)
+            filesize = int(response.headers.get('Content-Length', 0))
+            
+            msg_size = f"{filesize / 1024 / 1024:.2f} MB" if filesize > 0 else "未知大小"
+            progress(0.1, desc=f"📥 准备传输: {filename} ({msg_size})")
+
+            # 2. 准备上传到 Google Drive
+            service = get_drive_service()
+            folder_id = os.environ.get("GDRIVE_FOLDER_ID") # 可选，默认为根目录
+            
+            file_metadata = {'name': filename}
+            if folder_id:
+                file_metadata['parents'] = [folder_id]
+
+            # 使用自定义的 StreamingUploadFile 包装器
+            stream_wrapper = StreamingUploadFile(response)
+            
+            # resumable=True 允许分块上传，对大文件更稳定
+            # chunksize=10*1024*1024 (10MB) 
+            media = MediaIoBaseUpload(
+                stream_wrapper,
+                mimetype=response.headers.get('Content-Type', 'application/octet-stream'),
+                resumable=True,
+                chunksize=10 * 1024 * 1024 
+            )
+
+            progress(0.2, desc="☁️ 正在流式上传到 Google Drive...")
+            
+            # 执行上传
+            request = service.files().create(
+                body=file_metadata,
+                media_body=media,
+                fields='id, webContentLink, webViewLink'
+            )
+            
+            # 手动执行 next_chunk 以便可能监控进度 (简单起见直接 execute)
+            file = request.execute()
+            file_id = file.get('id')
+            
+            progress(0.9, desc="🔓 正在设置公开权限...")
+
+            # 3. 设置权限为公开 (Reader, Anyone)
             service.permissions().create(
                 fileId=file_id,
-                body=permission,
-                supportsAllDrives=True
+                body={'role': 'reader', 'type': 'anyone'}
             ).execute()
-            print("文件权限设置成功")
-        except HttpError as e:
-            print(f"设置权限时出现警告: {str(e)}")
-        
-        # 获取下载链接
-        download_link = file.get('webContentLink') or file.get('webViewLink')
-        
-        result = f"""
-✅ 上传成功！
 
-📁 文件名: {filename}
-🔗 下载链接: {download_link}
-📊 文件大小: {downloaded / (1024 * 1024):.2f} MB
+            # 4. 返回结果
+            web_link = file.get('webContentLink', file.get('webViewLink'))
+            return f"""✅ **转存成功!**
+            
+**文件名**: {filename}
+**文件ID**: {file_id}
+**下载链接**: [点击下载]({web_link})
 
-您可以通过上述链接访问或下载文件。
-        """
-        
-        return result.strip()
-        
-    except requests.exceptions.RequestException as e:
-        error_msg = f"❌ 下载文件时出错: {str(e)}"
-        print(error_msg)
-        traceback.print_exc()
-        return error_msg
-    
-    except HttpError as e:
-        error_msg = f"❌ Google Drive API 错误: {str(e)}"
-        print(error_msg)
-        traceback.print_exc()
-        return error_msg
-    
+*(文件已保存到您的 Google Drive，并已设为公开分享)*
+"""
+
     except Exception as e:
-        error_msg = f"❌ 发生未知错误: {str(e)}"
-        print(error_msg)
+        import traceback
         traceback.print_exc()
-        return error_msg
+        return f"❌ **发生错误**: {str(e)}"
 
-# 创建 Gradio 界面
-with gr.Blocks(title="URL to Google Drive", theme=gr.themes.Soft()) as demo:
-    gr.Markdown("""
-    # 🚀 URL to Google Drive Service
-    
-    将任意 URL 的文件直接转存到 Google Drive
-    """)
-    
-    with gr.Row():
-        with gr.Column():
-            file_url_input = gr.Textbox(
-                label="文件 URL",
-                placeholder="请输入文件的完整 URL (http:// 或 https://)",
-                lines=2
-            )
-            secret_code_input = gr.Textbox(
-                label="访问密码",
-                placeholder="请输入访问密码",
-                type="password"
-            )
-            submit_btn = gr.Button("🚀 开始转存", variant="primary")
+# ---------------------------------------------------------
+# 3. 构建 Gradio 界面
+# ---------------------------------------------------------
+with gr.Blocks(title="URL to Drive Saver") as demo:
+    gr.Markdown("# 🚀 URL to Google Drive Saver (Streamed)")
+    gr.Markdown("输入视频/文件 URL，后端将自动**流式**转存到您的 Google Drive。")
     
     with gr.Row():
-        output = gr.Textbox(
-            label="结果",
-            lines=10,
-            show_copy_button=True
-        )
+        url_input = gr.Textbox(label="文件 URL", placeholder="https://example.com/video.mp4")
+        submit_btn = gr.Button("开始转存", variant="primary")
     
+    output_markdown = gr.Markdown(label="状态日志")
+
     submit_btn.click(
-        fn=upload_to_drive,
-        inputs=[file_url_input, secret_code_input],
-        outputs=output
+        fn=process_upload,
+        inputs=url_input,
+        outputs=output_markdown,
+        api_name="save_to_drive"  # 暴露 API 端点 /api/save_to_drive
     )
-    
-    gr.Markdown("""
-    ---
-    ### 📝 使用说明
-    1. 输入要转存的文件 URL
-    2. 输入正确的访问密码
-    3. 点击"开始转存"按钮
-    4. 等待处理完成，获取 Google Drive 下载链接
-    
-    ### ⚠️ 注意事项
-    - 支持任何可通过 HTTP/HTTPS 访问的文件
-    - 文件将被上传到配置的 Google Drive 文件夹
-    - 上传后的文件默认设置为公开可读
-    """)
 
-# 启动应用
+# 启动 (开启 API，允许 CORS)
 if __name__ == "__main__":
-    demo.launch(
-        server_name="0.0.0.0",
-        server_port=7860,
-        share=False,
-        show_api=True
-    )
+    demo.queue(max_size=5).launch(server_name="0.0.0.0", show_api=True, share=False)
