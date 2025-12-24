@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>URL to Google Drive</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            padding: 40px;
+            max-width: 600px;
+            width: 100%;
+        }
+
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 10px;
+            font-size: 2em;
+        }
+
+        .subtitle {
+            text-align: center;
+            color: #666;
+            margin-bottom: 30px;
+            font-size: 0.9em;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            color: #555;
+            font-weight: 500;
+        }
+
+        input[type="text"],
+        input[type="password"] {
+            width: 100%;
+            padding: 12px 15px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 16px;
+            transition: border-color 0.3s;
+        }
+
+        input[type="text"]:focus,
+        input[type="password"]:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .btn {
+            width: 100%;
+            padding: 14px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 20px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn:active {
+            transform: translateY(0);
+        }
+
+        .btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .result {
+            margin-top: 30px;
+            padding: 20px;
+            background: #f5f5f5;
+            border-radius: 8px;
+            display: none;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            line-height: 1.6;
+        }
+
+        .result.show {
+            display: block;
+        }
+
+        .result.success {
+            background: #d4edda;
+            color: #155724;
+            border-left: 4px solid #28a745;
+        }
+
+        .result.error {
+            background: #f8d7da;
+            color: #721c24;
+            border-left: 4px solid #dc3545;
+        }
+
+        .loading {
+            display: none;
+            text-align: center;
+            margin-top: 20px;
+        }
+
+        .loading.show {
+            display: block;
+        }
+
+        .spinner {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .info {
+            background: #e7f3ff;
+            border-left: 4px solid #2196F3;
+            padding: 15px;
+            margin-top: 20px;
+            border-radius: 4px;
+            font-size: 14px;
+            color: #333;
+        }
+
+        .info h3 {
+            margin-bottom: 10px;
+            color: #2196F3;
+        }
+
+        .info ul {
+            margin-left: 20px;
+        }
+
+        .info li {
+            margin-bottom: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚀 URL to Google Drive</h1>
+        <p class="subtitle">将任意 URL 的文件直接转存到 Google Drive</p>
+
+        <form id="uploadForm">
+            <div class="form-group">
+                <label for="fileUrl">📎 文件 URL</label>
+                <input 
+                    type="text" 
+                    id="fileUrl" 
+                    name="fileUrl" 
+                    placeholder="请输入文件的完整 URL (http:// 或 https://)"
+                    required
+                >
+            </div>
+
+            <div class="form-group">
+                <label for="secretCode">🔒 访问密码</label>
+                <input 
+                    type="password" 
+                    id="secretCode" 
+                    name="secretCode" 
+                    placeholder="请输入访问密码"
+                    required
+                >
+            </div>
+
+            <button type="submit" class="btn" id="submitBtn">开始转存</button>
+        </form>
+
+        <div class="loading" id="loading">
+            <div class="spinner"></div>
+            <p style="margin-top: 10px; color: #667eea;">正在处理中，请稍候...</p>
+        </div>
+
+        <div class="result" id="result"></div>
+
+        <div class="info">
+            <h3>📝 使用说明</h3>
+            <ul>
+                <li>输入要转存的文件 URL（支持任何可通过 HTTP/HTTPS 访问的文件）</li>
+                <li>输入正确的访问密码</li>
+                <li>点击"开始转存"按钮</li>
+                <li>等待处理完成，获取 Google Drive 下载链接</li>
+            </ul>
+        </div>
+    </div>
+
+    <script type="module">
+        // ⚠️ 请将下面的 SPACE_ID 替换为您的 Hugging Face Space ID
+        // 格式: "username/space-name"
+        const SPACE_ID = "YOUR_USERNAME/url-to-drive-service";
+        const API_URL = `https://${SPACE_ID.replace('/', '-')}.hf.space`;
+
+        const form = document.getElementById('uploadForm');
+        const submitBtn = document.getElementById('submitBtn');
+        const loading = document.getElementById('loading');
+        const result = document.getElementById('result');
+        const fileUrlInput = document.getElementById('fileUrl');
+        const secretCodeInput = document.getElementById('secretCode');
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const fileUrl = fileUrlInput.value.trim();
+            const secretCode = secretCodeInput.value.trim();
+
+            if (!fileUrl || !secretCode) {
+                showResult('请填写所有必填字段', 'error');
+                return;
+            }
+
+            // 显示加载状态
+            submitBtn.disabled = true;
+            loading.classList.add('show');
+            result.classList.remove('show');
+
+            try {
+                // 调用 Gradio API
+                const response = await fetch(`${API_URL}/api/predict`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        data: [fileUrl, secretCode]
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const data = await response.json();
+                
+                // 获取结果
+                const resultText = data.data[0];
+                
+                // 判断是否成功
+                const isSuccess = resultText.includes('✅');
+                showResult(resultText, isSuccess ? 'success' : 'error');
+
+            } catch (error) {
+                console.error('Error:', error);
+                showResult(`❌ 请求失败: ${error.message}\n\n请检查：\n1. Space ID 是否正确配置\n2. Space 是否正在运行\n3. 网络连接是否正常`, 'error');
+            } finally {
+                submitBtn.disabled = false;
+                loading.classList.remove('show');
+            }
+        });
+
+        function showResult(text, type) {
+            result.textContent = text;
+            result.className = `result show ${type}`;
+        }
+
+        // 页面加载时的提示
+        if (SPACE_ID === "YOUR_USERNAME/url-to-drive-service") {
+            showResult('⚠️ 警告：请先在代码中配置正确的 Hugging Face Space ID！\n\n请查找并替换：const SPACE_ID = "YOUR_USERNAME/url-to-drive-service";', 'error');
+        }
+    </script>
+</body>
+</html>
