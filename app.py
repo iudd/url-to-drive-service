@@ -59,14 +59,11 @@ class StreamingUploadFile(io.IOBase):
     def seek(self, offset, whence=io.SEEK_SET):
         # Google Upload 在某些重试或断点续传场景可能调用 seek
         # 对于 requests stream，我们只能处理 'seek to current' 或 'seek to 0' (如果还没开始)
-        # 简单起见，如果 offset != position，则抛出错误（通常一次性上传不会触发回退）
         if whence == io.SEEK_SET and offset == self.position:
             return self.position
         if whence == io.SEEK_CUR and offset == 0:
             return self.position
         # 注意: 真实的完全流式转发很难支持真正的 seek。
-        # 如果遇到 Resumable Upload 断网重试，可能需要重新发起下载。
-        # 此处为简化实现，假设网络稳定。
         return self.position
 
     def tell(self):
@@ -135,7 +132,7 @@ def process_upload(file_url, progress=gr.Progress()):
                 fields='id, webContentLink, webViewLink'
             )
             
-            # 手动执行 next_chunk 以便可能监控进度 (简单起见直接 execute)
+            # 执行上传
             file = request.execute()
             file_id = file.get('id')
             
