@@ -1,49 +1,55 @@
 import os
 from google_auth_oauthlib.flow import InstalledAppFlow
 
-# ---------------------------------------------------------
-# 获取 Refresh Token 的脚本 (get_token.py)
-# ---------------------------------------------------------
-"""
-这是一个帮助脚本，用于在本地运行以获取 Refresh Token。
-不应该部署到 Hugging Face。
-
-使用步骤:
-1. 在 Google Cloud Console 下载 credentials.json 文件
-2. 运行: python get_token.py
-3. 复制打印出来的 Refresh Token
-"""
-if __name__ == "__main__":
-    
-    # 定义需要的权限范围
+def get_refresh_token_manual():
+    """
+    手动模式获取 Refresh Token (适用于无头服务器/SSH 环境)
+    """
     SCOPES = ['https://www.googleapis.com/auth/drive']
     
+    print("="*50)
+    print("🚀 Google Drive Refresh Token 获取助手 (手动模式)")
+    print("="*50)
+    
+    if not os.path.exists('client_secrets.json'):
+        print("\n❌ 错误: 未找到 'client_secrets.json'")
+        print("请确保已下载桌面应用的凭据文件并重命名为 client_secrets.json")
+        return
+
     try:
-        # 创建授权流程
-        # 注意: 这里假设你已经下载了 client_secrets.json 文件
-        if not os.path.exists('client_secrets.json'):
-            print("❌ 未找到 client_secrets.json 文件")
-            print("请从 Google Cloud Console 下载 OAuth 客户端凭据并重命名为 client_secrets.json")
-            exit(1)
-            
+        # 使用 OOB (Out-Of-Band) 流程
         flow = InstalledAppFlow.from_client_secrets_file(
             'client_secrets.json',
-            SCOPES
+            SCOPES,
+            redirect_uri='urn:ietf:wg:oauth:2.0:oob'
         )
         
-        # 运行本地服务器进行授权
-        print("🚀 正在启动浏览器进行授权...")
-        creds = flow.run_local_server(port=0)
+        # 获取授权 URL
+        auth_url, _ = flow.authorization_url(prompt='consent')
+        
+        print("\n1. 请复制下面的链接，在您本地电脑的浏览器中打开：")
+        print("-" * 20)
+        print(auth_url)
+        print("-" * 20)
+        
+        print("\n2. 在浏览器中登录 Google 账号并授权。")
+        print("3. 最后会显示一串授权代码 (Authorization Code)。")
+        
+        # 手动输入代码
+        code = input("\n✍️ 请在此粘贴授权代码并回车: ").strip()
+        
+        # 换取 Token
+        flow.fetch_token(code=code)
+        creds = flow.credentials
         
         print("\n" + "="*50)
-        print("✅ 授权成功!")
+        print("✅ 授权成功！")
         print("="*50)
-        print(f"G_REFRESH_TOKEN: {creds.refresh_token}")
+        print(f"\n您的 Refresh Token:\n\n{creds.refresh_token}\n")
         print("="*50)
-        print("\n请保存好这个 Refresh Token，并将其添加到 Hugging Face Space 的 Secrets 中。")
         
-    except ImportError:
-        print("❌ 缺少必要的库")
-        print("请运行: pip install google-auth-oauthlib")
     except Exception as e:
-        print(f"❌ 发生错误: {str(e)}")
+        print(f"\n❌ 发生错误: {str(e)}")
+
+if __name__ == "__main__":
+    get_refresh_token_manual()
