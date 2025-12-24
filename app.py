@@ -8,16 +8,17 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
 from googleapiclient.errors import HttpError
 from urllib.parse import urlparse
-import tempfile
 import traceback
 
 # 从环境变量加载配置
 GDRIVE_CREDENTIALS = os.environ.get('GDRIVE_CREDENTIALS')
 GDRIVE_FOLDER_ID = os.environ.get('GDRIVE_FOLDER_ID')
 SECRET_CODE = os.environ.get('SECRET_CODE', 'default_secret')
+# 新增：文件夹所有者邮箱（用于转移所有权）
+OWNER_EMAIL = os.environ.get('OWNER_EMAIL', '')
 
-# Google Drive API 作用域
-SCOPES = ['https://www.googleapis.com/auth/drive.file']
+# Google Drive API 作用域 - 使用完整权限
+SCOPES = ['https://www.googleapis.com/auth/drive']
 
 def get_drive_service():
     """初始化 Google Drive 服务"""
@@ -120,8 +121,11 @@ def upload_to_drive(file_url, secret_code):
         
         file_metadata = {
             'name': filename,
-            'parents': [GDRIVE_FOLDER_ID] if GDRIVE_FOLDER_ID else []
         }
+        
+        # 如果设置了文件夹ID，添加到父文件夹
+        if GDRIVE_FOLDER_ID:
+            file_metadata['parents'] = [GDRIVE_FOLDER_ID]
         
         media = MediaIoBaseUpload(
             file_buffer,
@@ -130,16 +134,51 @@ def upload_to_drive(file_url, secret_code):
             chunksize=1024*1024  # 1MB chunks
         )
         
+        # 上传文件，支持共享驱动器
         file = service.files().create(
             body=file_metadata,
             media_body=media,
-            fields='id, name, webViewLink, webContentLink'
+            fields='id, name, webViewLink, webContentLink, owners',
+            supportsAllDrives=True
         ).execute()
         
         file_id = file.get('id')
         print(f"上传成功，文件 ID: {file_id}")
         
-        # 第四步：设置文件权限为公开可读
+        # 第四步：如果设置了所有者邮箱，尝试转移所有权
+        if OWNER_EMAIL:
+            try:
+                print(f"正在将文件所有权转移给: {OWNER_EMAIL}")
+                permission = {
+                    'type': 'user',
+                    'role': 'owner',
+                    'emailAddress': OWNER_EMAIL
+                }
+                service.permissions().create(
+                    fileId=file_id,
+                    body=permission,
+                    transferOwnership=True,
+                    supportsAllDrives=True
+                ).execute()
+                print("所有权转移成功")
+            except HttpError as e:
+                print(f"所有权转移失败，尝试设置编辑权限: {str(e)}")
+                # 如果转移失败，至少给予编辑权限
+                try:
+                    permission = {
+                        'type': 'user',
+                        'role': 'writer',
+                        'emailAddress': OWNER_EMAIL
+                    }
+                    service.permissions().create(
+                        fileId=file_id,
+                        body=permission,
+                        supportsAllDrives=True
+                    ).execute()
+                except:
+                    pass
+        
+        # 第五步：设置文件权限为公开可读
         try:
             permission = {
                 'type': 'anyone',
@@ -147,7 +186,8 @@ def upload_to_drive(file_url, secret_code):
             }
             service.permissions().create(
                 fileId=file_id,
-                body=permission
+                body=permission,
+                supportsAllDrives=True
             ).execute()
             print("文件权限设置成功")
         except HttpError as e:
