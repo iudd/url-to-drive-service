@@ -1,7 +1,19 @@
+import os
+from google_auth_oauthlib.flow import InstalledAppFlow
 
+# ---------------------------------------------------------
+# 获取 Refresh Token 的脚本 (get_token.py)
+# ---------------------------------------------------------
+"""
+这是一个帮助脚本，用于在本地运行以获取 Refresh Token。
+不应该部署到 Hugging Face。
+
+使用步骤:
+1. 在 Google Cloud Console 下载 credentials.json 文件
+2. 运行: python get_token.py
+3. 复制打印出来的 Refresh Token
+"""
 if __name__ == "__main__":
-    import os
-    from google_auth_oauthlib.flow import InstalledAppFlow
     
     # 定义需要的权限范围
     SCOPES = ['https://www.googleapis.com/auth/drive']
