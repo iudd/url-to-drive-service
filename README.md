@@ -1,176 +1,52 @@
+# ☁️ URL to Drive Saver
+
+这是一个全栈解决方案，用于将任意 URL 的文件（视频、压缩包等）通过 Hugging Face Space 中转，**流式**上传到您的个人 Google Drive。
+
+## ✨ 特性
+
+- **OAuth 2.0 鉴权**: 彻底解决 Service Account 存储配额为 0 的问题。
+- **内存优化**: 使用 Python Generator 和 Streaming Upload，支持转存数 GB 的大文件，不会爆掉 Hugging Face 的内存。
+- **前后端分离**: 提供独立的 `index.html`，可部署在任何地方（GitHub Pages, Vercel 等）。
+
 ---
-title: URL to Google Drive Service
-emoji: 🚀
-colorFrom: blue
-colorTo: purple
-sdk: gradio
-sdk_version: "4.0.0"
-app_file: app.py
-pinned: false
+
+## 🚀 部署步骤
+
+### 第一步：获取 Google OAuth 凭据 (Refresh Token)
+
+由于我们不能使用 Service Account，您需要创建一个 OAuth 应用来授权访问您的个人 Drive。
+
+1. 去 [Google Cloud Console](https://console.cloud.google.com/).
+2. 创建一个新项目，启用 **Google Drive API**。
+3. 进入 **OAuth 同意屏幕**，User Type 选择 **External** (外部)，并添加您的测试邮箱。
+4. 进入 **凭据** -> **创建凭据** -> **OAuth 客户端 ID** (类型选 Desktop App)。
+5. 获取 `Client ID` 和 `Client Secret`。
+6. **获取 Refresh Token**:
+   - 在本地运行一个 Python 脚本来完成一次授权流程（Google 官方库的 `flow.run_local_server()`）。
+   - 或者使用 [Google OAuth Playground](https://developers.google.com/oauthplayground/)：
+     - Scope 填: `https://www.googleapis.com/auth/drive`
+     - 点击 Authorize APIs -> Exchange authorization code for tokens。
+     - 复制 `Refresh Token`。
+
+### 第二步：部署后端 (Hugging Face Space)
+
+1. 创建一个新的 Hugging Face Space (SDK 选择 **Gradio**)。
+2. 将 `app.py` 和 `requirements.txt` 上传到 Space。
+3. 进入 **Settings** -> **Repository Secrets**，添加以下环境变量：
+   - `G_CLIENT_ID`: 您的 Client ID
+   - `G_CLIENT_SECRET`: 您的 Client Secret
+   - `G_REFRESH_TOKEN`: 您的 Refresh Token
+   - `GDRIVE_FOLDER_ID`: (可选) 目标文件夹 ID，不填则存根目录。
+
+### 第三步：部署前端
+
+1. 打开 `index.html`。
+2. 修改第 52 行：`const HF_SPACE_ID = "YourUsername/YourSpaceName";` 为您的 Space ID。
+3. 将 HTML 文件部署到 GitHub Pages，或者直接在浏览器打开使用。
+
 ---
-
-# URL to Google Drive Service
-
-一个将任意 URL 的文件直接转存到 Google Drive 的在线服务。
-
-## 🌟 功能特点
-
-- ✅ 支持任何可通过 HTTP/HTTPS 访问的文件
-- ✅ 流式下载和上传，避免内存溢出
-- ✅ 自动设置文件为公开可读
-- ✅ 简洁美观的 Web 界面
-- ✅ 密码保护，防止滥用
-- ✅ 完整的错误处理机制
-
-## 📋 项目架构
-
-- **Backend**: 基于 Gradio SDK 运行在 Hugging Face Spaces
-- **Frontend**: 静态 HTML 页面，通过 JavaScript 调用后端 API
-- **Storage**: Google Drive (使用 Service Account)
-
-## 🚀 快速开始
-
-### 1. 访问在线服务
-
-直接访问部署好的前端界面：[URL to Google Drive](https://your-frontend-url.com)
-
-### 2. 使用方法
-
-1. 在文件 URL 框中输入要转存的文件链接
-2. 输入正确的访问密码
-3. 点击"开始转存"按钮
-4. 等待处理完成，获取 Google Drive 下载链接
-
-## 🔧 部署指南
-
-### 自动部署（推荐）
-
-1. **Fork 此仓库** 到您的 GitHub 账户
-2. **启用 GitHub Actions**（在仓库设置中）
-3. **配置 Secrets**：
-   - `HF_TOKEN`: 您的 Hugging Face API Token
-4. **推送代码** 或 **手动触发 Actions**
-5. 系统会自动在 Hugging Face Spaces 创建应用
-
-### 手动部署
-
-#### 步骤 1: 准备 Google Cloud
-
-1. 访问 [Google Cloud Console](https://console.cloud.google.com/)
-2. 创建新项目或选择现有项目
-3. 启用 Google Drive API
-4. 创建服务账号并下载 JSON 密钥
-
-#### 步骤 2: 创建 Hugging Face Space
-
-1. 访问 [Hugging Face Spaces](https://huggingface.co/spaces)
-2. 点击 "Create new Space"
-3. 配置：
-   - **Name**: `url2drive`
-   - **SDK**: `Gradio`
-   - **Hardware**: `CPU basic` (免费)
-
-#### 步骤 3: 配置环境变量
-
-在 Space Settings > Secrets 中添加：
-
-```
-GDRIVE_CREDENTIALS: [完整的 JSON 密钥内容]
-GDRIVE_FOLDER_ID: [Google Drive 文件夹 ID]
-SECRET_CODE: [访问密码]
-```
-
-#### 步骤 4: 上传代码
-
-上传以下文件到 Space：
-- `app.py`
-- `requirements.txt`
-
-### 前端部署
-
-将 `index.html` 文件部署到任何静态托管服务：
-- GitHub Pages
-- Netlify
-- Vercel
-- 直接浏览器打开
-
-## 🔧 环境变量说明
-
-| 变量名 | 必需 | 说明 |
-|--------|------|------|
-| `GDRIVE_CREDENTIALS` | 是 | Google Service Account JSON 密钥 |
-| `GDRIVE_FOLDER_ID` | 否 | 目标文件夹 ID（可选） |
-| `SECRET_CODE` | 否 | 访问密码（默认为 'default_secret'） |
-
-### 获取 GDRIVE_CREDENTIALS
-
-1. 在 Google Cloud Console 创建服务账号
-2. 生成 JSON 密钥文件
-3. 复制整个 JSON 内容（包括大括号）
-
-### 获取 GDRIVE_FOLDER_ID
-
-1. 在 Google Drive 中打开目标文件夹
-2. URL 中的 `folders/FOLDER_ID` 部分即为 ID
-
-## 📖 使用示例
-
-### 支持的文件类型
-- 📄 文档: PDF, DOCX, XLSX, PPTX
-- 🖼️ 图片: JPG, PNG, GIF, SVG
-- 🎥 视频: MP4, AVI, MKV, MOV
-- 📦 压缩包: ZIP, RAR, 7Z
-- 💾 其他: 任何可下载的文件
-
-### 示例 URL
-```
-https://example.com/file.pdf
-https://github.com/user/repo/releases/download/v1.0/file.zip
-https://cdn.example.com/image.jpg
-```
 
 ## ⚠️ 注意事项
 
-- 文件大小受 Hugging Face Spaces 免费版限制（约 16GB）
-- 下载速度取决于源服务器
-- 上传速度受 Google Drive API 限制
-- 请妥善保管访问密码
-
-## 🛠️ 本地开发
-
-```bash
-# 克隆项目
-git clone https://github.com/iudd/url-to-drive-service.git
-cd url-to-drive-service
-
-# 安装依赖
-pip install -r requirements.txt
-
-# 设置环境变量
-export GDRIVE_CREDENTIALS='{"type":"service_account",...}'
-export GDRIVE_FOLDER_ID='your_folder_id'
-export SECRET_CODE='your_password'
-
-# 运行应用
-python app.py
-```
-
-访问 `http://localhost:7860` 测试应用。
-
-## 🤝 贡献
-
-欢迎提交 Issue 和 Pull Request！
-
-## 📄 许可证
-
-MIT License
-
-## 🔗 相关链接
-
-- [Hugging Face Spaces 文档](https://huggingface.co/docs/hub/spaces)
-- [Gradio 文档](https://gradio.app/docs/)
-- [Google Drive API 文档](https://developers.google.com/drive/api/v3/about-sdk)
-
----
-
-**⭐ 如果这个项目对你有帮助，请给个 Star！**
+- **流量**: 文件流经 Hugging Face 服务器，速度取决于 HF 的网络状况。
+- **超时**: 极大的文件可能会触达 Gradio 或 HF 的超时限制（通常 1 小时左右）。
