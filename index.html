@@ -3,8 +3,23 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>URL to Google Drive</title>
+    <title>🚀 URL to Google Drive - 专业文件转存服务</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%23667eea' d='M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M18,20H6V4H13V9H18V20Z' /%3E%3C/svg%3E">
     <style>
+        :root {
+            --primary-color: #667eea;
+            --secondary-color: #764ba2;
+            --success-color: #28a745;
+            --error-color: #dc3545;
+            --warning-color: #ffc107;
+            --info-color: #17a2b8;
+            --dark-color: #343a40;
+            --light-color: #f8f9fa;
+            --shadow: 0 10px 30px rgba(0,0,0,0.1);
+            --border-radius: 16px;
+            --transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
         * {
             margin: 0;
             padding: 0;
@@ -12,140 +27,372 @@
         }
 
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, var(--primary-color) 0%, var(--secondary-color) 100%);
             min-height: 100vh;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            padding: 20px;
+            color: #333;
+            overflow-x: hidden;
+        }
+
+        .background-animation {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: -1;
+            background: 
+                radial-gradient(circle at 20% 80%, rgba(120, 119, 198, 0.3) 0%, transparent 50%),
+                radial-gradient(circle at 80% 20%, rgba(255, 119, 198, 0.3) 0%, transparent 50%),
+                radial-gradient(circle at 40% 40%, rgba(120, 219, 226, 0.3) 0%, transparent 50%);
+            animation: backgroundMove 20s ease-in-out infinite;
+        }
+
+        @keyframes backgroundMove {
+            0%, 100% { transform: translate(0, 0) rotate(0deg); }
+            33% { transform: translate(30px, -30px) rotate(120deg); }
+            66% { transform: translate(-20px, 20px) rotate(240deg); }
         }
 
         .container {
-            background: white;
-            border-radius: 20px;
-            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
-            padding: 40px;
-            max-width: 600px;
-            width: 100%;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
+            justify-content: center;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 40px;
+            animation: fadeInUp 1s ease-out;
+        }
+
+        .logo {
+            width: 80px;
+            height: 80px;
+            background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 20px;
+            box-shadow: var(--shadow);
+            font-size: 36px;
+            animation: bounce 2s ease-in-out infinite;
+        }
+
+        @keyframes bounce {
+            0%, 20%, 50%, 80%, 100% { transform: translateY(0); }
+            40% { transform: translateY(-10px); }
+            60% { transform: translateY(-5px); }
         }
 
         h1 {
-            color: #333;
-            text-align: center;
+            font-size: 2.5rem;
+            font-weight: 700;
+            background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
             margin-bottom: 10px;
-            font-size: 2em;
         }
 
         .subtitle {
-            text-align: center;
-            color: #666;
+            font-size: 1.1rem;
+            color: rgba(255,255,255,0.9);
+            max-width: 600px;
+            line-height: 1.6;
+        }
+
+        .main-card {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(20px);
+            border-radius: var(--border-radius);
+            padding: 40px;
+            width: 100%;
+            box-shadow: var(--shadow);
+            border: 1px solid rgba(255,255,255,0.2);
+            animation: fadeInUp 1s ease-out 0.2s both;
+        }
+
+        .form-section {
             margin-bottom: 30px;
-            font-size: 0.9em;
         }
 
         .form-group {
-            margin-bottom: 20px;
+            margin-bottom: 25px;
+            position: relative;
+        }
+
+        .input-wrapper {
+            position: relative;
+            overflow: hidden;
         }
 
         label {
             display: block;
             margin-bottom: 8px;
-            color: #555;
-            font-weight: 500;
+            font-weight: 600;
+            color: var(--dark-color);
+            font-size: 0.95rem;
+        }
+
+        .input-icon {
+            position: absolute;
+            left: 15px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: var(--primary-color);
+            font-size: 18px;
+            z-index: 2;
         }
 
         input[type="text"],
         input[type="password"] {
             width: 100%;
-            padding: 12px 15px;
-            border: 2px solid #e0e0e0;
-            border-radius: 8px;
+            padding: 16px 16px 16px 50px;
+            border: 2px solid #e9ecef;
+            border-radius: 12px;
             font-size: 16px;
-            transition: border-color 0.3s;
+            transition: var(--transition);
+            background: #fff;
+            outline: none;
         }
 
         input[type="text"]:focus,
         input[type="password"]:focus {
-            outline: none;
-            border-color: #667eea;
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+            transform: translateY(-1px);
         }
 
-        .btn {
+        .input-hint {
+            font-size: 0.85rem;
+            color: #6c757d;
+            margin-top: 5px;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .btn-primary {
             width: 100%;
-            padding: 14px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 18px 30px;
+            background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
             color: white;
             border: none;
-            border-radius: 8px;
+            border-radius: 12px;
             font-size: 16px;
             font-weight: 600;
             cursor: pointer;
-            transition: transform 0.2s, box-shadow 0.2s;
+            transition: var(--transition);
+            position: relative;
+            overflow: hidden;
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
         }
 
-        .btn:hover {
+        .btn-primary:hover {
             transform: translateY(-2px);
-            box-shadow: 0 5px 20px rgba(102, 126, 234, 0.4);
+            box-shadow: 0 8px 25px rgba(102, 126, 234, 0.4);
         }
 
-        .btn:active {
+        .btn-primary:active {
             transform: translateY(0);
         }
 
-        .btn:disabled {
-            background: #ccc;
+        .btn-primary:disabled {
+            background: #6c757d;
             cursor: not-allowed;
             transform: none;
+            box-shadow: none;
         }
 
-        .result {
+        .btn-primary::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
+            transition: left 0.5s;
+        }
+
+        .btn-primary:hover::before {
+            left: 100%;
+        }
+
+        .progress-section {
             margin-top: 30px;
-            padding: 20px;
-            background: #f5f5f5;
-            border-radius: 8px;
             display: none;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 8px;
+            background: #e9ecef;
+            border-radius: 4px;
+            overflow: hidden;
+            margin-bottom: 10px;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, var(--primary-color), var(--secondary-color));
+            width: 0%;
+            transition: width 0.3s ease;
+            border-radius: 4px;
+        }
+
+        .progress-text {
+            text-align: center;
+            font-size: 0.9rem;
+            color: var(--dark-color);
+            font-weight: 500;
+        }
+
+        .result-card {
+            margin-top: 30px;
+            padding: 25px;
+            border-radius: 12px;
+            display: none;
+            animation: slideIn 0.5s ease-out;
+            border-left: 4px solid;
+        }
+
+        .result-card.success {
+            background: #d4edda;
+            border-left-color: var(--success-color);
+            color: #155724;
+        }
+
+        .result-card.error {
+            background: #f8d7da;
+            border-left-color: var(--error-color);
+            color: #721c24;
+        }
+
+        .result-card.warning {
+            background: #fff3cd;
+            border-left-color: var(--warning-color);
+            color: #856404;
+        }
+
+        .result-content {
             white-space: pre-wrap;
             word-wrap: break-word;
-            font-family: 'Courier New', monospace;
+            font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Code', 'Droid Sans Mono', 'Source Code Pro', monospace;
             font-size: 14px;
             line-height: 1.6;
         }
 
-        .result.show {
-            display: block;
+        .copy-btn {
+            margin-top: 15px;
+            padding: 8px 16px;
+            background: rgba(0,0,0,0.1);
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.85rem;
+            transition: var(--transition);
         }
 
-        .result.success {
-            background: #d4edda;
-            color: #155724;
-            border-left: 4px solid #28a745;
+        .copy-btn:hover {
+            background: rgba(0,0,0,0.2);
         }
 
-        .result.error {
-            background: #f8d7da;
-            color: #721c24;
-            border-left: 4px solid #dc3545;
+        .features-section {
+            margin-top: 40px;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
         }
 
-        .loading {
-            display: none;
+        .feature-card {
+            background: rgba(255, 255, 255, 0.9);
+            padding: 25px;
+            border-radius: 12px;
             text-align: center;
-            margin-top: 20px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.08);
+            transition: var(--transition);
+            border: 1px solid rgba(255,255,255,0.3);
         }
 
-        .loading.show {
+        .feature-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 30px rgba(0,0,0,0.15);
+        }
+
+        .feature-icon {
+            font-size: 2rem;
+            margin-bottom: 15px;
             display: block;
+        }
+
+        .feature-title {
+            font-weight: 600;
+            margin-bottom: 10px;
+            color: var(--dark-color);
+        }
+
+        .feature-desc {
+            color: #6c757d;
+            font-size: 0.9rem;
+            line-height: 1.5;
+        }
+
+        .footer {
+            margin-top: 40px;
+            text-align: center;
+            color: rgba(255,255,255,0.8);
+            font-size: 0.9rem;
+        }
+
+        .footer a {
+            color: rgba(255,255,255,0.9);
+            text-decoration: none;
+            transition: var(--transition);
+        }
+
+        .footer a:hover {
+            color: white;
+            text-decoration: underline;
+        }
+
+        @keyframes fadeInUp {
+            from {
+                opacity: 0;
+                transform: translateY(30px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
         }
 
         .spinner {
-            border: 3px solid #f3f3f3;
-            border-top: 3px solid #667eea;
-            border-radius: 50%;
             width: 40px;
             height: 40px;
+            border: 3px solid rgba(102, 126, 234, 0.3);
+            border-top: 3px solid var(--primary-color);
+            border-radius: 50%;
             animation: spin 1s linear infinite;
-            margin: 0 auto;
+            margin: 20px auto;
         }
 
         @keyframes spin {
@@ -153,110 +400,281 @@
             100% { transform: rotate(360deg); }
         }
 
-        .info {
-            background: #e7f3ff;
-            border-left: 4px solid #2196F3;
-            padding: 15px;
-            margin-top: 20px;
-            border-radius: 4px;
-            font-size: 14px;
-            color: #333;
+        .status-message {
+            text-align: center;
+            color: var(--primary-color);
+            font-weight: 500;
+            margin-top: 10px;
         }
 
-        .info h3 {
-            margin-bottom: 10px;
-            color: #2196F3;
+        /* 响应式设计 */
+        @media (max-width: 768px) {
+            .container {
+                padding: 15px;
+            }
+            
+            .main-card {
+                padding: 25px;
+            }
+            
+            h1 {
+                font-size: 2rem;
+            }
+            
+            .subtitle {
+                font-size: 1rem;
+            }
+            
+            .features-section {
+                grid-template-columns: 1fr;
+                gap: 15px;
+            }
         }
 
-        .info ul {
-            margin-left: 20px;
-        }
-
-        .info li {
-            margin-bottom: 5px;
+        /* 暗色模式支持 */
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --dark-color: #f8f9fa;
+                --light-color: #343a40;
+            }
+            
+            .main-card {
+                background: rgba(33, 37, 41, 0.95);
+                color: var(--dark-color);
+            }
+            
+            input[type="text"],
+            input[type="password"] {
+                background: #495057;
+                border-color: #6c757d;
+                color: white;
+            }
+            
+            .feature-card {
+                background: rgba(33, 37, 41, 0.9);
+                color: var(--dark-color);
+            }
         }
     </style>
 </head>
 <body>
+    <div class="background-animation"></div>
+    
     <div class="container">
-        <h1>🚀 URL to Google Drive</h1>
-        <p class="subtitle">将任意 URL 的文件直接转存到 Google Drive</p>
+        <header class="header">
+            <div class="logo">🚀</div>
+            <h1>URL to Google Drive</h1>
+            <p class="subtitle">专业文件转存服务 - 将任意网络文件安全快捷地转存到您的 Google Drive</p>
+        </header>
 
-        <form id="uploadForm">
-            <div class="form-group">
-                <label for="fileUrl">📎 文件 URL</label>
-                <input 
-                    type="text" 
-                    id="fileUrl" 
-                    name="fileUrl" 
-                    placeholder="请输入文件的完整 URL (http:// 或 https://)"
-                    required
-                >
+        <main class="main-card">
+            <form id="uploadForm" class="form-section">
+                <div class="form-group">
+                    <label for="fileUrl">📎 文件 URL</label>
+                    <div class="input-wrapper">
+                        <span class="input-icon">🔗</span>
+                        <input 
+                            type="url" 
+                            id="fileUrl" 
+                            name="fileUrl" 
+                            placeholder="请输入文件的完整 URL (https:// 或 http://)"
+                            required
+                        >
+                    </div>
+                    <div class="input-hint">
+                        <span>💡</span>
+                        支持任何可公开访问的文件链接
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="secretCode">🔒 访问密码</label>
+                    <div class="input-wrapper">
+                        <span class="input-icon">🔐</span>
+                        <input 
+                            type="password" 
+                            id="secretCode" 
+                            name="secretCode" 
+                            placeholder="请输入访问密码"
+                            required
+                        >
+                    </div>
+                    <div class="input-hint">
+                        <span>🔒</span>
+                        密码用于保护服务安全
+                    </div>
+                </div>
+
+                <button type="submit" class="btn-primary" id="submitBtn">
+                    🚀 开始转存文件
+                </button>
+            </form>
+
+            <div class="progress-section" id="progressSection">
+                <div class="spinner"></div>
+                <div class="status-message" id="statusMessage">正在连接服务器...</div>
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progressFill"></div>
+                </div>
+                <div class="progress-text" id="progressText">准备中...</div>
             </div>
 
-            <div class="form-group">
-                <label for="secretCode">🔒 访问密码</label>
-                <input 
-                    type="password" 
-                    id="secretCode" 
-                    name="secretCode" 
-                    placeholder="请输入访问密码"
-                    required
-                >
+            <div class="result-card" id="resultCard">
+                <div class="result-content" id="resultContent"></div>
+                <button class="copy-btn" id="copyBtn" style="display: none;">📋 复制结果</button>
             </div>
+        </main>
 
-            <button type="submit" class="btn" id="submitBtn">开始转存</button>
-        </form>
+        <section class="features-section">
+            <div class="feature-card">
+                <span class="feature-icon">⚡</span>
+                <div class="feature-title">高速传输</div>
+                <div class="feature-desc">采用流式下载和分块上传技术，高效处理大文件</div>
+            </div>
+            <div class="feature-card">
+                <span class="feature-icon">🔒</span>
+                <div class="feature-title">安全可靠</div>
+                <div class="feature-desc">密码保护，文件权限自动设置为公开可读</div>
+            </div>
+            <div class="feature-card">
+                <span class="feature-icon">🌐</span>
+                <div class="feature-title">兼容性强</div>
+                <div class="feature-desc">支持各种文件格式和来源，无文件大小限制</div>
+            </div>
+        </section>
 
-        <div class="loading" id="loading">
-            <div class="spinner"></div>
-            <p style="margin-top: 10px; color: #667eea;">正在处理中，请稍候...</p>
-        </div>
-
-        <div class="result" id="result"></div>
-
-        <div class="info">
-            <h3>📝 使用说明</h3>
-            <ul>
-                <li>输入要转存的文件 URL（支持任何可通过 HTTP/HTTPS 访问的文件）</li>
-                <li>输入正确的访问密码</li>
-                <li>点击"开始转存"按钮</li>
-                <li>等待处理完成，获取 Google Drive 下载链接</li>
-            </ul>
-        </div>
+        <footer class="footer">
+            <p>
+                由 <a href="https://huggingface.co/spaces/iyougame/url2drive" target="_blank">Hugging Face Spaces</a> 提供支持 | 
+                <a href="https://github.com/iudd/url-to-drive-service" target="_blank">查看源码</a>
+            </p>
+        </footer>
     </div>
 
     <script type="module">
-        // ⚠️ 请将下面的 SPACE_ID 替换为您的 Hugging Face Space ID
-        // 格式: "username/space-name"
-        const SPACE_ID = "YOUR_USERNAME/url-to-drive-service";
+        // 配置 Hugging Face Space
+        const SPACE_ID = "iyougame/url2drive";
         const API_URL = `https://${SPACE_ID.replace('/', '-')}.hf.space`;
 
+        // DOM 元素
         const form = document.getElementById('uploadForm');
         const submitBtn = document.getElementById('submitBtn');
-        const loading = document.getElementById('loading');
-        const result = document.getElementById('result');
+        const progressSection = document.getElementById('progressSection');
+        const progressFill = document.getElementById('progressFill');
+        const progressText = document.getElementById('progressText');
+        const statusMessage = document.getElementById('statusMessage');
+        const resultCard = document.getElementById('resultCard');
+        const resultContent = document.getElementById('resultContent');
+        const copyBtn = document.getElementById('copyBtn');
         const fileUrlInput = document.getElementById('fileUrl');
         const secretCodeInput = document.getElementById('secretCode');
 
+        // 状态管理
+        let currentProgress = 0;
+        let progressInterval;
+
+        // 进度模拟函数
+        function updateProgress(step, message) {
+            const steps = {
+                'connecting': { progress: 10, text: '正在连接服务器...' },
+                'downloading': { progress: 40, text: '正在下载文件...' },
+                'uploading': { progress: 70, text: '正在上传到 Google Drive...' },
+                'finalizing': { progress: 90, text: '正在完成处理...' },
+                'complete': { progress: 100, text: '处理完成！' }
+            };
+
+            if (steps[step]) {
+                currentProgress = steps[step].progress;
+                progressFill.style.width = `${currentProgress}%`;
+                progressText.textContent = steps[step].text;
+                statusMessage.textContent = message;
+            }
+        }
+
+        // 显示结果
+        function showResult(text, type = 'success') {
+            resultCard.className = `result-card ${type}`;
+            resultContent.textContent = text;
+            resultCard.style.display = 'block';
+
+            // 如果是成功结果，显示复制按钮
+            if (type === 'success' && text.includes('🔗')) {
+                copyBtn.style.display = 'inline-block';
+            } else {
+                copyBtn.style.display = 'none';
+            }
+
+            // 平滑滚动到结果
+            resultCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+
+        // 复制结果到剪贴板
+        copyBtn.addEventListener('click', async () => {
+            try {
+                await navigator.clipboard.writeText(resultContent.textContent);
+                const originalText = copyBtn.textContent;
+                copyBtn.textContent = '✅ 已复制！';
+                copyBtn.style.background = 'rgba(40, 167, 69, 0.2)';
+                setTimeout(() => {
+                    copyBtn.textContent = originalText;
+                    copyBtn.style.background = '';
+                }, 2000);
+            } catch (err) {
+                alert('复制失败，请手动选择文本复制');
+            }
+        });
+
+        // 表单提交处理
         form.addEventListener('submit', async (e) => {
             e.preventDefault();
             
             const fileUrl = fileUrlInput.value.trim();
             const secretCode = secretCodeInput.value.trim();
 
-            if (!fileUrl || !secretCode) {
-                showResult('请填写所有必填字段', 'error');
+            // 验证输入
+            if (!fileUrl) {
+                showResult('❌ 请填写文件 URL', 'error');
+                fileUrlInput.focus();
                 return;
             }
 
-            // 显示加载状态
+            if (!secretCode) {
+                showResult('❌ 请填写访问密码', 'error');
+                secretCodeInput.focus();
+                return;
+            }
+
+            // 验证 URL 格式
+            try {
+                new URL(fileUrl);
+            } catch {
+                showResult('❌ 请提供有效的 URL 格式 (http:// 或 https://)', 'error');
+                fileUrlInput.focus();
+                return;
+            }
+
+            // 重置界面
+            resultCard.style.display = 'none';
+            progressSection.style.display = 'block';
             submitBtn.disabled = true;
-            loading.classList.add('show');
-            result.classList.remove('show');
+            submitBtn.textContent = '处理中...';
+            currentProgress = 0;
+            progressFill.style.width = '0%';
+
+            // 开始进度跟踪
+            updateProgress('connecting', '正在初始化连接...');
 
             try {
-                // 调用 Gradio API
+                // 模拟进度更新
+                progressInterval = setInterval(() => {
+                    if (currentProgress < 15) {
+                        updateProgress('connecting', '正在验证访问权限...');
+                    }
+                }, 1000);
+
+                // 调用 API
+                updateProgress('connecting', '正在连接到转存服务...');
+                
                 const response = await fetch(`${API_URL}/api/predict`, {
                     method: 'POST',
                     headers: {
@@ -267,37 +685,87 @@
                     })
                 });
 
+                clearInterval(progressInterval);
+
                 if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
+                    throw new Error(`服务器响应错误: ${response.status}`);
                 }
 
+                updateProgress('downloading', '正在下载文件...');
+
                 const data = await response.json();
-                
-                // 获取结果
                 const resultText = data.data[0];
-                
-                // 判断是否成功
+
+                updateProgress('complete', '处理完成！');
+
+                // 判断结果类型
                 const isSuccess = resultText.includes('✅');
-                showResult(resultText, isSuccess ? 'success' : 'error');
+                const isError = resultText.includes('❌');
+
+                if (isSuccess) {
+                    showResult(resultText, 'success');
+                } else if (isError) {
+                    showResult(resultText, 'error');
+                } else {
+                    showResult(resultText, 'warning');
+                }
 
             } catch (error) {
-                console.error('Error:', error);
-                showResult(`❌ 请求失败: ${error.message}\n\n请检查：\n1. Space ID 是否正确配置\n2. Space 是否正在运行\n3. 网络连接是否正常`, 'error');
+                clearInterval(progressInterval);
+                console.error('请求失败:', error);
+                
+                let errorMessage = '❌ 网络请求失败\n\n';
+                errorMessage += '可能的原因：\n';
+                errorMessage += '• 服务器暂时不可用\n';
+                errorMessage += '• 网络连接问题\n';
+                errorMessage += '• Space 配置不正确\n\n';
+                errorMessage += `技术详情: ${error.message}`;
+                
+                showResult(errorMessage, 'error');
             } finally {
+                progressSection.style.display = 'none';
                 submitBtn.disabled = false;
-                loading.classList.remove('show');
+                submitBtn.textContent = '🚀 开始转存文件';
             }
         });
 
-        function showResult(text, type) {
-            result.textContent = text;
-            result.className = `result show ${type}`;
-        }
+        // URL 输入验证
+        fileUrlInput.addEventListener('input', (e) => {
+            const url = e.target.value.trim();
+            if (url && !url.match(/^https?:\/\//)) {
+                e.target.style.borderColor = '#ffc107';
+            } else {
+                e.target.style.borderColor = '';
+            }
+        });
 
-        // 页面加载时的提示
-        if (SPACE_ID === "YOUR_USERNAME/url-to-drive-service") {
-            showResult('⚠️ 警告：请先在代码中配置正确的 Hugging Face Space ID！\n\n请查找并替换：const SPACE_ID = "YOUR_USERNAME/url-to-drive-service";', 'error');
-        }
+        // 页面加载提示
+        window.addEventListener('load', () => {
+            if (SPACE_ID.includes('YOUR_USERNAME')) {
+                showResult('⚠️ 配置提醒：请确保 Hugging Face Space 已正确配置！', 'warning');
+            }
+        });
+
+        // 添加一些动画效果
+        const observerOptions = {
+            threshold: 0.1,
+            rootMargin: '0px 0px -50px 0px'
+        };
+
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    entry.target.style.animationDelay = '0s';
+                    entry.target.style.animationPlayState = 'running';
+                }
+            });
+        }, observerOptions);
+
+        // 观察所有卡片
+        document.querySelectorAll('.feature-card').forEach(card => {
+            card.style.animationPlayState = 'paused';
+            observer.observe(card);
+        });
     </script>
 </body>
 </html>
