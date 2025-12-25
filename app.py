@@ -12,21 +12,26 @@ import google.auth.exceptions
 from googleapiclient.errors import HttpError
 
 # ---------------------------------------------------------
-# 0. 配置日志
+# 0. 配置日志 (INFO Level - 关闭太详细的底层调试)
 # ---------------------------------------------------------
-logging.basicConfig(level=logging.INFO) # 关闭Debug，只看关键信息
+http.client.HTTPConnection.debuglevel = 0
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------
 # 1. 鉴权与服务初始化
 # ---------------------------------------------------------
 def get_drive_service():
+    """
+    使用环境变量中的 Refresh Token 动态构建 Credentials 对象。
+    """
     client_id = os.environ.get("G_CLIENT_ID")
     client_secret = os.environ.get("G_CLIENT_SECRET")
     refresh_token = os.environ.get("G_REFRESH_TOKEN")
     
     if not all([client_id, client_secret, refresh_token]):
-        raise EnvironmentError("❌ 缺少必要的 OAuth 环境变量")
+        logger.error("❌ 环境变量缺失")
+        raise EnvironmentError("❌ 缺少必要的 OAuth 环境变量 (G_CLIENT_ID, G_CLIENT_SECRET, G_REFRESH_TOKEN)")
 
     creds = Credentials(
         token=None,
@@ -47,16 +52,22 @@ class StreamingUploadFile(io.IOBase):
         self.position = 0
 
     def read(self, size=-1):
-        chunk = self.raw.read(size)
-        if chunk:
-            self.position += len(chunk)
-        return chunk
+        try:
+            chunk = self.raw.read(size)
+            if chunk:
+                self.position += len(chunk)
+            return chunk
+        except Exception as e:
+            logger.error(f"❌ 读取下载流失败: {e}")
+            raise
 
     def seek(self, offset, whence=io.SEEK_SET):
+        # 仅支持获取当前位置和重置到当前位置 (伪 Seek)
         if whence == io.SEEK_SET and offset == self.position:
             return self.position
         if whence == io.SEEK_CUR and offset == 0:
             return self.position
+        # logger.warning(f"⚠️ 忽略不支持的 Seek 操作: offset={offset}, whence={whence}")
         return self.position
 
     def tell(self):
@@ -77,23 +88,31 @@ def process_upload(file_url, progress=gr.Progress()):
         return "❌ 错误: 请输入有效的 URL"
     
     try:
-        # --- 1. 初始化 ---
-        service = get_drive_service()
+        # --- 🔍 验证 Token ---
+        try:
+            service = get_drive_service()
+            service.about().get(fields="user").execute()
+        except Exception as e:
+            logger.error(f"❌ Token 验证失败: {e}")
+            return f"❌ **鉴权错误**: 无法连接 Google Drive API。\n详情: {e}"
 
-        # --- 2. 下载 ---
-        logger.info(f"📥 开始下载: {file_url}")
+        # --- 🚀 开始下载 ---
+        progress(0, desc="🚀 初始化连接...")
+        logger.info(f"📥 开始下载 URL: {file_url}")
+        
         with requests.get(file_url, stream=True, headers={'User-Agent': 'Mozilla/5.0'}) as response:
             response.raise_for_status()
             
             filename = get_filename_from_response(response, file_url)
             filesize = int(response.headers.get('Content-Length', 0))
             msg_size = f"{filesize / 1024 / 1024:.2f} MB" if filesize > 0 else "未知大小"
+            
             progress(0.1, desc=f"📥 准备传输: {filename} ({msg_size})")
 
-            # --- 3. 准备上传 ---
-            folder_id = os.environ.get("GDRIVE_FOLDER_ID", "").strip()
+            # --- ☁️ 准备上传 ---
+            folder_id = os.environ.get("GDRIVE_FOLDER_ID")
             file_metadata = {'name': filename}
-            if folder_id:
+            if folder_id and folder_id.strip():
                 file_metadata['parents'] = [folder_id]
 
             stream_wrapper = StreamingUploadFile(response)
@@ -110,45 +129,52 @@ def process_upload(file_url, progress=gr.Progress()):
             request = service.files().create(
                 body=file_metadata,
                 media_body=media,
-                fields='id, webContentLink, webViewLink'
+                fields='id, webViewLink'
             )
             
-            response = None
-            while response is None:
-                status, response = request.next_chunk()
+            # --- 🔥 执行上传 ---
+            file = None
+            response_obj = None
+            while response_obj is None:
+                status, response_obj = request.next_chunk()
                 if status:
-                    logger.debug(f"进度: {int(status.progress() * 100)}%")
+                    progress_percent = int(status.progress() * 100)
+                    if progress_percent % 10 == 0:
+                        logger.info(f"⏳ 上传进度: {progress_percent}%")
 
-            file = response
+            file = response_obj
             file_id = file.get('id')
-            logger.info(f"✅ 上传完成，ID: {file_id}")
+            logger.info(f"✅ 上传完成，File ID: {file_id}")
             
-            # --- 4. 尝试设置权限 (容错处理) ---
-            web_link = file.get('webContentLink', file.get('webViewLink'))
-            permission_status = "🔒 私有 (默认)"
+            # --- 🔓 尝试设置权限 (容错处理) ---
+            web_link = file.get('webViewLink', f"https://drive.google.com/file/d/{file_id}/view")
+            permission_msg = "🔓 已设置为公开"
             
             try:
-                progress(0.9, desc="🔓 正在尝试公开分享...")
+                progress(0.9, desc="🔓 正在设置权限...")
                 service.permissions().create(
                     fileId=file_id,
                     body={'role': 'reader', 'type': 'anyone'}
                 ).execute()
-                permission_status = "🌍 已公开"
             except HttpError as e:
-                logger.warning(f"⚠️ 无法设置为公开 (这是正常的): {e}")
-                permission_status = "🔒 私有 (Google 限制了自动公开，请去网盘手动分享)"
+                logger.warning(f"⚠️ 无法设置公开权限 (HTTP {e.resp.status}): {e}")
+                permission_msg = "🔒 私有文件 (权限设置被拒绝)"
+            except Exception as e:
+                logger.warning(f"⚠️ 设置权限时发生未知错误: {e}")
+                permission_msg = "🔒 私有文件 (设置出错)"
 
             return f"""✅ **转存成功!**
             
 **文件名**: {filename}
+**状态**: {permission_msg}
 **文件ID**: {file_id}
-**状态**: {permission_status}
-**下载链接**: [点击打开]({web_link})
-*(注: 如果链接打不开，请去您的 Google Drive 查看)*
+**查看链接**: [点击打开 Google Drive]({web_link})
 """
 
+    except BrokenPipeError:
+        return "❌ **上传中断**: 连接被 Google 拒绝。通常是因为网络不稳定，请重试。"
     except Exception as e:
-        logger.error(f"❌ 错误: {e}", exc_info=True)
+        logger.error(f"❌ 全局异常捕获: {str(e)}", exc_info=True)
         return f"❌ **发生错误**: {str(e)}"
 
 # ---------------------------------------------------------
@@ -161,7 +187,7 @@ with gr.Blocks(title="URL to Drive Saver") as demo:
         url_input = gr.Textbox(label="文件 URL", placeholder="https://example.com/video.mp4")
         submit_btn = gr.Button("开始转存", variant="primary")
     
-    output_markdown = gr.Markdown(label="结果")
+    output_markdown = gr.Markdown(label="状态日志")
 
     submit_btn.click(
         fn=process_upload,
