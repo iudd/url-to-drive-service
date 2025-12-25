@@ -37,32 +37,50 @@ def get_drive_service():
     return build("drive", "v3", credentials=creds)
 
 # ---------------------------------------------------------
-# 2. 核心流式处理逻辑 (Raw Stream + Decode 模式)
+# 2. 核心流式处理逻辑 (Raw Stream 模式)
 # ---------------------------------------------------------
-class DirectStreamWrapper(io.IOBase):
+class RawStreamAdapter(io.IOBase):
     """
-    极简封装 requests.raw 对象。
-    关键点：仅透传 read() 调用，不进行任何缓冲，确保原汁原味。
-    同时提供 tell() 用于进度监控。
+    直接适配 requests.response.raw 对象。
+    关键点：
+    1. 启用 decode_content=True 处理 Gzip。
+    2. 模拟 seek/tell 以满足 Google API 的接口检查。
     """
-    def __init__(self, raw_stream):
-        self._raw = raw_stream
+    def __init__(self, raw_response_obj):
+        self._raw = raw_response_obj
         self._position = 0
+        
+        # ⚠️ 核心修复: 强制 urllib3 自动处理 Gzip 解压
+        self._raw.decode_content = True
 
     def read(self, size=-1):
-        # 直接调用底层的 read，不做任何 buffer 干预
-        # requests.raw (urllib3.response.HTTPResponse) 会处理好一切
-        data = self._raw.read(size)
-        if data:
-            self._position += len(data)
-        return data
-
-    def tell(self):
-        return self._position
+        # 如果 size 为 -1，读取所有（不推荐但要做兼容）
+        if size == -1:
+            size = None # read() 不传参默认读所有
+        
+        try:
+            chunk = self._raw.read(size) or b""
+            self._position += len(chunk)
+            
+            # 调试日志：监控前几个包，确保有数据
+            if self._position < 1024 * 1024: 
+                logger.debug(f"🔍 正在读取流数据... 本次读取: {len(chunk)} 字节, 总计: {self._position}")
+                
+            return chunk
+        except Exception as e:
+            logger.error(f"❌ 数据流读取异常: {e}")
+            raise
 
     def seek(self, offset, whence=io.SEEK_SET):
-        # 必须实现 seek 接口以满足 MediaIoBaseUpload 的检查
-        # 但流不支持实际 seek，只能返回当前位置
+        # Google Upload 可能会在开始前 seek(0)
+        if offset == self._position:
+            return self._position
+        if offset == 0 and self._position == 0:
+            return 0
+        # 如果还没读过数据，允许 seek(0)
+        return self._position
+
+    def tell(self):
         return self._position
 
 def get_filename_from_response(response, url):
@@ -80,18 +98,12 @@ def process_upload(file_url, progress=gr.Progress()):
         return "❌ 错误: 请输入有效的 URL"
     
     try:
-        # --- 1. 鉴权 ---
         service = get_drive_service()
 
-        # --- 2. 下载 ---
         logger.info(f"📥 开始下载: {file_url}")
         
-        # 关键配置 1: stream=True
         with requests.get(file_url, stream=True, headers={'User-Agent': 'Mozilla/5.0'}) as response:
             response.raise_for_status()
-            
-            # 关键配置 2: 开启底层自动解码 (解决 Gzip/0KB 问题)
-            response.raw.decode_content = True
             
             filename = get_filename_from_response(response, file_url)
             filesize = int(response.headers.get('Content-Length', 0))
@@ -99,26 +111,19 @@ def process_upload(file_url, progress=gr.Progress()):
             
             progress(0.1, desc=f"📥 准备: {filename} ({msg_size})")
 
-            # --- 3. 准备上传 ---
             folder_id = os.environ.get("GDRIVE_FOLDER_ID", "").strip()
             file_metadata = {'name': filename}
             if folder_id:
                 file_metadata['parents'] = [folder_id]
 
-            # 使用极简封装
-            stream_wrapper = DirectStreamWrapper(response.raw)
+            # 关键修复：直接使用 Raw Adapter + Gzip 解码
+            stream_wrapper = RawStreamAdapter(response.raw)
             
-            # 预读取几个字节测试一下数据流是否正常 (Debug用)
-            # peek_data = stream_wrapper.read(10)
-            # logger.info(f"🔍 数据流检查: 前10字节 hex: {peek_data.hex()}")
-            # 注意：不能真读，否则流就断了。urllib3 不支持 peek。
-            # 所以这里我们相信 decode_content=True 的威力。
-
             media = MediaIoBaseUpload(
                 stream_wrapper,
                 mimetype=response.headers.get('Content-Type', 'application/octet-stream'),
                 resumable=True,
-                chunksize=5 * 1024 * 1024 
+                chunksize=10 * 1024 * 1024  # 10MB 分片
             )
 
             progress(0.2, desc="☁️ 正在流式上传...")
@@ -129,7 +134,6 @@ def process_upload(file_url, progress=gr.Progress()):
                 fields='id, webViewLink, size'
             )
             
-            # --- 4. 执行上传 ---
             response_obj = None
             while response_obj is None:
                 status, response_obj = request.next_chunk()
@@ -140,30 +144,30 @@ def process_upload(file_url, progress=gr.Progress()):
             file = response_obj
             file_id = file.get('id')
             uploaded_size = int(file.get('size', 0))
-            logger.info(f"✅ 上传完成，ID: {file_id}, 云端大小: {uploaded_size} bytes")
+            
+            logger.info(f"✅ 上传完成. ID: {file_id}")
+            logger.info(f"📊 云端文件大小: {uploaded_size} 字节 ({uploaded_size/1024/1024:.2f} MB)")
+            
+            # 安全检查：如果还是 0KB，直接报错
+            if uploaded_size == 0 and filesize > 0:
+                 return f"❌ **上传警告**: 文件已创建但大小为 0KB。可能源服务器不支持流式读取或压缩格式异常。\nID: {file_id}"
 
-            if uploaded_size == 0:
-                return f"❌ **上传失败**: 文件大小为 0KB。可能是源站拒绝了流式访问或连接中断。"
-
-            # --- 5. 权限设置 ---
+            # 权限设置
             web_link = file.get('webViewLink', f"https://drive.google.com/file/d/{file_id}/view")
             perm_status = "🔒 私有"
-            
             try:
                 service.permissions().create(
-                    fileId=file_id,
-                    body={'role': 'reader', 'type': 'anyone'}
+                    fileId=file_id, body={'role': 'reader', 'type': 'anyone'}
                 ).execute()
                 perm_status = "🌍 公开"
-            except Exception:
-                pass
+            except Exception: pass
 
             return f"""✅ **转存成功!**
             
 **文件名**: {filename}
-**实际大小**: {uploaded_size / 1024 / 1024:.2f} MB
+**云端大小**: {uploaded_size / 1024 / 1024:.2f} MB
 **状态**: {perm_status}
-**链接**: [Google Drive]({web_link})
+**链接**: [点击打开]({web_link})
 """
 
     except Exception as e:
@@ -182,12 +186,7 @@ with gr.Blocks(title="URL to Drive Saver") as demo:
     
     output_markdown = gr.Markdown(label="结果")
 
-    submit_btn.click(
-        fn=process_upload,
-        inputs=url_input,
-        outputs=output_markdown,
-        api_name="save_to_drive"
-    )
+    submit_btn.click(process_upload, inputs=url_input, outputs=output_markdown)
 
 if __name__ == "__main__":
     demo.queue().launch(server_name="0.0.0.0", show_api=True)
