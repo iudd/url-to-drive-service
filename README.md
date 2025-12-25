@@ -1,6 +1,6 @@
 ---
 title: URL to Drive Saver
-emoji: 🚀
+emoji: ☁️
 colorFrom: blue
 colorTo: indigo
 sdk: gradio
@@ -9,54 +9,59 @@ app_file: app.py
 pinned: false
 ---
 
-# ☁️ URL to Drive Saver (OAuth 2.0 版)
+# 🚀 URL to Google Drive Saver (OAuth 2.0 Streaming Edition)
 
-这是一个全栈解决方案，用于将任意 URL 的文件（视频、压缩包等）通过 Hugging Face Space 中转，**流式**上传到您的个人 Google Drive。
+这是一个部署在 Hugging Face Space 上的全栈应用，用于将网络上的文件（视频、压缩包等）**流式传输**直接保存到您的 Google Drive 个人版。
 
-## ✨ 特性
+## ✨ 核心特性
 
-- **OAuth 2.0 鉴权**: 彻底解决 Service Account 存储配额为 0 的问题，直接使用您的个人 Google Drive 空间（15GB+）。
-- **内存优化**: 使用流式传输 (Streaming Upload)，支持转存数 GB 的大文件，不会爆掉 Hugging Face 的内存。
-- **前后端分离**: 提供独立的 `index.html`，可部署在任何地方。
-
----
-
-## 🚀 部署与配置指南
-
-### 第一步：获取 Google OAuth 凭据 (Refresh Token)
-
-**注意**：由于 Hugging Face 服务器在海外，如果您本地网络无法连接 Google，建议使用云端方式（如 Colab）或在 VPS 上获取 Token。
-
-1. **创建凭据**:
-   - 访问 [Google Cloud Console](https://console.cloud.google.com/)。
-   - 创建 **OAuth 客户端 ID** -> 应用类型选择 **桌面应用 (Desktop App)**。
-   - 获取 `Client ID` 和 `Client Secret`。
-
-2. **获取 Refresh Token**:
-   - 运行项目中的 `get_token.py` 脚本（需在本地或 Colab 运行，不要在 Space 运行）。
-   - 按提示输入 ID 和 Secret，完成登录授权，获取 `Refresh Token`。
-
-### 第二步：配置 Hugging Face Space
-
-1. 点击 Space 页面顶部的 **Settings** 选项卡。
-2. 找到 **Variables and secrets** -> 点击 **New secret**。
-3. 添加以下三个环境变量：
-   - `G_CLIENT_ID`: (您的 Client ID)
-   - `G_CLIENT_SECRET`: (您的 Client Secret)
-   - `G_REFRESH_TOKEN`: (脚本获取的 Refresh Token)
-   - `GDRIVE_FOLDER_ID`: (可选，指定上传的文件夹 ID)
-
-### 第三步：使用
-
-配置完成后，Space 会自动重启。等待状态变为 **Running**：
-
-1. 打开项目中的 `index.html` 文件。
-2. 修改代码中的 `HF_SPACE_ID` 为您的 Space ID (例如 `iyougame/url2drive`)。
-3. 用浏览器打开 `index.html`，输入文件 URL 即可开始转存。
+- **OAuth 2.0 鉴权**: 使用您自己的 Google 账号，**彻底解决** Service Account 存储配额为 0 的问题。
+- **流式传输 (Streaming)**: 采用 `requests(stream=True)` 和 `MediaIoBaseUpload`，支持转存超大文件，不占用服务器内存。
+- **隐私安全**: 您的 Refresh Token 存储在 Secrets 中，文件直接存入您的网盘，不经过第三方存储。
 
 ---
 
-## ⚠️ 常见问题
+## ⚙️ 部署配置指南 (必读)
 
-- **Redirect URI mismatch**: 请确保在 Google Cloud Console 创建凭据时选的是**桌面应用**，不要选 Web 应用。
-- **Token 过期**: 请在 OAuth 同意屏幕中将应用发布为**生产环境 (Production)**，否则 Token 只有 7 天有效期。
+要让此应用正常工作，您必须配置以下 **Repository Secrets**：
+
+### 1. 准备 OAuth 凭据
+请参考项目中的 `get_token.py` 脚本或使用 Google OAuth Playground 获取以下三个值：
+1. **Client ID** (桌面应用类型)
+2. **Client Secret**
+3. **Refresh Token** (用于获取访问令牌)
+
+### 2. 添加 Secrets
+进入 Space 的 **Settings** -> **Repository secrets**，添加以下变量：
+
+| Secret Name | 说明 | 示例值 |
+| :--- | :--- | :--- |
+| `G_CLIENT_ID` | 您的 OAuth 客户端 ID | `xxx.apps.googleusercontent.com` |
+| `G_CLIENT_SECRET` | 您的 OAuth 客户端密钥 | `GOCSPX-xxxx...` |
+| `G_REFRESH_TOKEN` | 您的刷新令牌 | `1//04Pq...` |
+| `GDRIVE_FOLDER_ID` | (可选) 目标文件夹 ID | `1AbCdEf...` (留空则存入根目录) |
+
+---
+
+## 🖥️ 如何使用
+
+### 方式 A: 使用 Space 自带界面
+直接在当前 Space 页面输入文件 URL 和（可选的）访问密码（如果在代码中设置了的话），点击提交。
+
+### 方式 B: 使用独立前端 (推荐)
+本项目包含一个 `index.html` 文件，您可以将其部署到 GitHub Pages 或本地运行。
+1. 打开 `index.html`。
+2. 修改 `const HF_SPACE_ID = "您的用户名/Space名称";`。
+3. 打开页面即可使用，界面更现代，体验更好。
+
+---
+
+## 🛠️ 故障排除
+
+- **Error: redirect_uri_mismatch**: 您的 Client ID 类型选错了（选了 Web 而不是 Desktop），或者未配置 Playground 回调地址。请重建“桌面应用”类型的 ID。
+- **Error: invalid_grant**: Refresh Token 已过期（测试版 7 天过期）。请在 Google Cloud Console 将应用发布为“生产环境”。
+- **Runtime Error**: 请检查 Logs，通常是环境变量未正确设置。
+
+---
+
+此项目旨在解决 Hugging Face 临时空间无法持久化存储大文件的问题。如有问题，请查看 Logs。
