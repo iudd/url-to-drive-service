@@ -2,22 +2,21 @@ import os
 import requests
 import gradio as gr
 import logging
-import shutil
-import tempfile
-import time
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 from urllib.parse import urlparse, unquote
+import uuid
+import shutil
 
 # ---------------------------------------------------------
-# 0. 配置日志
+# 0. 配置日志 (INFO)
 # ---------------------------------------------------------
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------
-# 1. 鉴权
+# 1. 鉴权与服务初始化
 # ---------------------------------------------------------
 def get_drive_service():
     client_id = os.environ.get("G_CLIENT_ID")
@@ -36,7 +35,7 @@ def get_drive_service():
     )
     return build("drive", "v3", credentials=creds)
 
-def get_filename_from_url(response, url):
+def get_filename_from_response(response, url):
     content_disposition = response.headers.get("Content-Disposition")
     if content_disposition:
         import re
@@ -44,74 +43,73 @@ def get_filename_from_url(response, url):
         if fname:
             return unquote(fname[0])
     parsed = urlparse(url)
-    return os.path.basename(unquote(parsed.path)) or f"file_{int(time.time())}"
+    return os.path.basename(unquote(parsed.path)) or "downloaded_file"
 
 # ---------------------------------------------------------
-# 2. 核心逻辑：下载到本地 -> 上传 (最稳健方案)
+# 2. 核心处理逻辑 (落盘暂存模式 - 绝对稳健)
 # ---------------------------------------------------------
 def process_upload(file_url, progress=gr.Progress()):
     if not file_url:
-        return "❌ 错误: 请输入 URL"
+        return "❌ 错误: 请输入有效的 URL"
     
-    temp_path = None
+    temp_filepath = None
     try:
-        # --- 1. 鉴权检查 ---
+        # --- 1. 鉴权 ---
         try:
             service = get_drive_service()
         except Exception as e:
-            return f"❌ 鉴权失败: {e}"
+            return f"❌ **鉴权失败**: {str(e)}"
 
         # --- 2. 下载到临时文件 ---
-        progress(0, desc="🚀 正在连接资源...")
-        logger.info(f"📥 准备下载: {file_url}")
+        progress(0, desc="🚀 初始化下载...")
+        logger.info(f"📥 [Phase 1] 开始下载: {file_url}")
         
         with requests.get(file_url, stream=True, headers={'User-Agent': 'Mozilla/5.0'}) as response:
             response.raise_for_status()
             
-            filename = get_filename_from_url(response, file_url)
+            filename = get_filename_from_response(response, file_url)
             total_size = int(response.headers.get('Content-Length', 0))
             
-            # 创建临时文件
-            fd, temp_path = tempfile.mkstemp(suffix=f"_{filename}")
-            os.close(fd) # 关闭句柄，让 open 去处理
+            # 使用 UUID 防止文件名冲突
+            temp_filename = f"{uuid.uuid4()}_{filename}"
+            temp_filepath = os.path.join("/tmp", temp_filename)
             
-            msg_size = f"{total_size / 1024 / 1024:.2f} MB" if total_size > 0 else "未知大小"
-            logger.info(f"💾 开始下载到临时文件: {temp_path} ({msg_size})")
-            progress(0.1, desc=f"📥 正在下载到中转站: {filename}...")
-
-            # 下载并写入硬盘
-            downloaded = 0
-            with open(temp_path, 'wb') as f:
+            logger.info(f"💾 正在写入临时文件: {temp_filepath}")
+            
+            with open(temp_filepath, 'wb') as f:
+                downloaded = 0
+                # 1MB 缓冲区写入硬盘
                 for chunk in response.iter_content(chunk_size=1024*1024):
                     if chunk:
                         f.write(chunk)
                         downloaded += len(chunk)
-                        # 更新下载进度
+                        
+                        # 更新下载进度 (0% - 50%)
                         if total_size > 0:
-                            p = 0.1 + (0.4 * (downloaded / total_size))
-                            progress(p, desc=f"📥 下载中: {downloaded/1024/1024:.1f}/{msg_size}")
-
+                            p = (downloaded / total_size) * 0.5
+                            progress(p, desc=f"📥 下载中: {downloaded/1024/1024:.1f} MB")
+        
         # --- 3. 校验本地文件 ---
-        local_size = os.path.getsize(temp_path)
-        logger.info(f"✅ 本地下载完成，大小: {local_size} bytes")
+        local_size = os.path.getsize(temp_filepath)
+        logger.info(f"✅ 本地下载完成. 大小: {local_size} bytes")
         
         if local_size == 0:
-            os.remove(temp_path)
-            return "❌ **下载失败**: 源文件无法读取或为空 (0KB)。请检查 URL 是否有效。"
+            return "❌ **下载失败**: 源文件下载到本地后大小为 0KB，请检查 URL 是否有效。"
 
         # --- 4. 上传到 Google Drive ---
-        progress(0.5, desc=f"☁️ 正在上传到 Google Drive ({local_size/1024/1024:.2f} MB)...")
+        progress(0.5, desc="☁️ 准备上传...")
+        logger.info(f"🚀 [Phase 2] 开始上传到 Google Drive")
         
         folder_id = os.environ.get("GDRIVE_FOLDER_ID", "").strip()
         file_metadata = {'name': filename}
         if folder_id:
             file_metadata['parents'] = [folder_id]
 
-        # 使用 MediaFileUpload (针对本地文件，极其稳定)
+        # 使用 MediaFileUpload (针对本地文件，这是 Google 最稳健的上传方式)
         media = MediaFileUpload(
-            temp_path,
-            mimetype='application/octet-stream', # 让 Google 自动检测或作为二进制
-            resumable=True
+            temp_filepath,
+            resumable=True,
+            chunksize=10 * 1024 * 1024 
         )
 
         request = service.files().create(
@@ -119,63 +117,60 @@ def process_upload(file_url, progress=gr.Progress()):
             media_body=media,
             fields='id, webViewLink, size'
         )
-
-        # 执行分片上传
+        
         response_obj = None
         while response_obj is None:
             status, response_obj = request.next_chunk()
             if status:
-                # 映射进度 0.5 -> 1.0
-                p = 0.5 + (0.5 * status.progress())
-                progress(p, desc=f"☁️ 上传中: {int(status.progress()*100)}%")
-                # logger.info(f"上传进度: {int(status.progress()*100)}%")
-
-        # --- 5. 完成处理 ---
+                # 更新上传进度 (50% - 100%)
+                upload_prog = status.progress()
+                total_prog = 0.5 + (upload_prog * 0.5)
+                progress(total_prog, desc=f"☁️ 上传中: {int(upload_prog * 100)}%")
+                
         file = response_obj
         file_id = file.get('id')
-        cloud_size = int(file.get('size', 0))
-        
-        logger.info(f"✅ Google Drive 接收完成. ID: {file_id}, 大小: {cloud_size}")
-        
-        # 再次校验云端大小
-        status_msg = ""
-        if cloud_size == 0:
-            status_msg = "\n⚠️ **警告**: 云端文件显示为 0KB，请检查网盘。"
-        
-        # 权限
-        web_link = file.get('webViewLink', f"https://drive.google.com/file/d/{file_id}/view")
-        perm_str = "🔒 私有"
-        try:
-            service.permissions().create(
-                fileId=file_id, body={'role': 'reader', 'type': 'anyone'}
-            ).execute()
-            perm_str = "🌍 公开"
-        except Exception: pass
+        uploaded_size = int(file.get('size', 0))
+        logger.info(f"✅ 上传完成. ID: {file_id}, 云端大小: {uploaded_size}")
 
-        # 清理临时文件
+        if uploaded_size == 0:
+             return f"❌ **上传警告**: 云端文件 0KB，但本地文件正常({local_size})。这非常罕见。"
+
+        # --- 5. 权限设置 ---
+        web_link = file.get('webViewLink', f"https://drive.google.com/file/d/{file_id}/view")
+        perm_status = "🔒 私有"
         try:
-            os.remove(temp_path)
-            logger.info("🗑️ 临时文件已清理")
-        except: pass
+            progress(0.95, desc="🔓 设置权限...")
+            service.permissions().create(
+                fileId=file_id,
+                body={'role': 'reader', 'type': 'anyone'}
+            ).execute()
+            perm_status = "🌍 公开"
+        except Exception: pass
 
         return f"""✅ **转存成功!**
         
 **文件名**: {filename}
-**大小**: {cloud_size / 1024 / 1024:.2f} MB
-**状态**: {perm_str}
-**链接**: [点击打开 Google Drive]({web_link})
-{status_msg}
+**本地大小**: {local_size / 1024 / 1024:.2f} MB
+**云端大小**: {uploaded_size / 1024 / 1024:.2f} MB
+**状态**: {perm_status}
+**链接**: [Google Drive]({web_link})
 """
 
     except Exception as e:
-        logger.error(f"❌ 流程异常: {e}", exc_info=True)
-        # 确保清理
-        if temp_path and os.path.exists(temp_path):
-            os.remove(temp_path)
+        logger.error(f"❌ 错误: {e}", exc_info=True)
         return f"❌ **发生错误**: {str(e)}"
+        
+    finally:
+        # --- 6. 清理临时文件 ---
+        if temp_filepath and os.path.exists(temp_filepath):
+            try:
+                os.remove(temp_filepath)
+                logger.info(f"🧹 已删除临时文件: {temp_filepath}")
+            except Exception as e:
+                logger.warning(f"⚠️ 无法删除临时文件: {e}")
 
 # ---------------------------------------------------------
-# 3. 界面
+# 3. 构建界面
 # ---------------------------------------------------------
 with gr.Blocks(title="URL to Drive Saver") as demo:
     gr.Markdown("# 🚀 URL to Google Drive Saver (Stable Mode)")
@@ -184,9 +179,14 @@ with gr.Blocks(title="URL to Drive Saver") as demo:
         url_input = gr.Textbox(label="文件 URL", placeholder="https://example.com/video.mp4")
         submit_btn = gr.Button("开始转存", variant="primary")
     
-    output_markdown = gr.Markdown(label="状态")
+    output_markdown = gr.Markdown(label="结果")
 
-    submit_btn.click(process_upload, inputs=url_input, outputs=output_markdown)
+    submit_btn.click(
+        fn=process_upload,
+        inputs=url_input,
+        outputs=output_markdown,
+        api_name="save_to_drive"
+    )
 
 if __name__ == "__main__":
     demo.queue().launch(server_name="0.0.0.0", show_api=True)
