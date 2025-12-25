@@ -13,8 +13,6 @@ def get_refresh_token_manual_input():
     
     # 1. 直接让用户输入凭据信息
     print("\n请准备好您的 Google Cloud Console -> 凭据 -> OAuth 客户端 ID 信息")
-    print("注意：Client ID 通常以 .apps.googleusercontent.com 结尾")
-    
     client_id = input("\n👉 请输入 Client ID: ").strip()
     client_secret = input("👉 请输入 Client Secret: ").strip()
     
