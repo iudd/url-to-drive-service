@@ -8,12 +8,12 @@ from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
 from urllib.parse import urlparse, unquote
+import google.auth.exceptions
 from googleapiclient.errors import HttpError
 
 # ---------------------------------------------------------
 # 0. 配置日志
 # ---------------------------------------------------------
-http.client.HTTPConnection.debuglevel = 0
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -38,63 +38,48 @@ def get_drive_service():
     return build("drive", "v3", credentials=creds)
 
 # ---------------------------------------------------------
-# 2. 核心流式处理逻辑 (重写版 - 解决 0KB 问题)
+# 2. 核心流式处理逻辑 (改进版：ResponseStream)
 # ---------------------------------------------------------
-class RequestsStreamWrapper(io.IOBase):
-    """
-    将 requests 的 iter_content 封装为 file-like 对象。
-    解决直接读取 raw 可能导致的 0KB 或 Gzip 问题。
-    """
-    def __init__(self, response):
-        self.iterator = response.iter_content(chunk_size=1024 * 1024) # 每次从网络取 1MB
-        self.buffer = b""
-        self.position = 0
+class ResponseStream(io.IOBase):
+    def __init__(self, iter_content):
+        self._iter = iter_content
+        self._buffer = b""
+        self._position = 0
 
     def read(self, size=-1):
-        # 如果缓冲区为空且需要读取，尝试从网络获取数据
-        if not self.buffer:
-            try:
-                self.buffer = next(self.iterator)
-            except StopIteration:
-                return b"" # 流结束
-
-        # 如果 size 为 -1，读取所有（危险，通常不应在流式上传中使用）
+        # 如果需要读所有内容 (size=-1)，这对于大文件很危险，但在 chunk 上传中通常不会发生
         if size == -1:
-            data = self.buffer
-            self.buffer = b""
-            # 继续读取直到结束
-            try:
-                while True:
-                    data += next(self.iterator)
-            except StopIteration:
-                pass
-            self.position += len(data)
-            return data
+            out = self._buffer + b"".join(self._iter)
+            self._buffer = b""
+            self._position += len(out)
+            return out
 
-        # 读取指定大小
-        length = len(self.buffer)
-        
-        # 如果当前缓冲区不够，且流还没断，继续获取直到够用或流结束
-        while length < size:
+        # 只要 buffer 不够且迭代器还有数据，就继续填充
+        while len(self._buffer) < size:
             try:
-                chunk = next(self.iterator)
-                self.buffer += chunk
-                length += len(chunk)
+                chunk = next(self._iter)
+                self._buffer += chunk
             except StopIteration:
                 break
-
-        # 从缓冲区切片返回
-        data = self.buffer[:size]
-        self.buffer = self.buffer[size:] # 剩余的留给下次
-        self.position += len(data)
+        
+        # 取出数据
+        length = min(len(self._buffer), size)
+        data = self._buffer[:length]
+        self._buffer = self._buffer[length:]
+        self._position += length
         return data
 
-    def seek(self, offset, whence=io.SEEK_SET):
-        # 欺骗 Google API，假装我们支持 seek，实际上只能原地踏步
-        return self.position
-
     def tell(self):
-        return self.position
+        return self._position
+
+    def seek(self, offset, whence=io.SEEK_SET):
+        # 仅允许“假装”seek 到当前位置或0 (如果还没开始读)
+        if offset == self._position:
+            return self._position
+        if offset == 0 and self._position == 0:
+            return 0
+        # logger.warning(f"⚠️ 忽略不支持的 Seek: offset={offset}, pos={self._position}")
+        return self._position
 
 def get_filename_from_response(response, url):
     content_disposition = response.headers.get("Content-Disposition")
@@ -111,12 +96,11 @@ def process_upload(file_url, progress=gr.Progress()):
         return "❌ 错误: 请输入有效的 URL"
     
     try:
-        # --- 1. 鉴权 ---
+        # --- 1. 初始化 ---
         service = get_drive_service()
 
         # --- 2. 下载 ---
         logger.info(f"📥 开始下载: {file_url}")
-        
         # stream=True 是必须的
         with requests.get(file_url, stream=True, headers={'User-Agent': 'Mozilla/5.0'}) as response:
             response.raise_for_status()
@@ -124,8 +108,7 @@ def process_upload(file_url, progress=gr.Progress()):
             filename = get_filename_from_response(response, file_url)
             filesize = int(response.headers.get('Content-Length', 0))
             msg_size = f"{filesize / 1024 / 1024:.2f} MB" if filesize > 0 else "未知大小"
-            
-            progress(0.1, desc=f"📥 准备传输: {filename} ({msg_size})")
+            progress(0.1, desc=f"📥 准备: {filename} ({msg_size})")
 
             # --- 3. 准备上传 ---
             folder_id = os.environ.get("GDRIVE_FOLDER_ID", "").strip()
@@ -133,16 +116,15 @@ def process_upload(file_url, progress=gr.Progress()):
             if folder_id:
                 file_metadata['parents'] = [folder_id]
 
-            # 使用新的 Wrapper
-            stream_wrapper = RequestsStreamWrapper(response)
+            # 关键修改：使用 iter_content(chunk_size)
+            # chunk_size 设置为 1MB，保证流的平滑
+            stream_wrapper = ResponseStream(response.iter_content(chunk_size=1024*1024))
             
-            # 关键：设置 chunksize，Google 会按照这个大小调用 read()
-            # 5MB 是 Google 推荐的最小分片
             media = MediaIoBaseUpload(
                 stream_wrapper,
                 mimetype=response.headers.get('Content-Type', 'application/octet-stream'),
                 resumable=True,
-                chunksize=5 * 1024 * 1024 
+                chunksize=5 * 1024 * 1024  # 上传分块设为 5MB
             )
 
             progress(0.2, desc="☁️ 正在流式上传...")
@@ -150,55 +132,64 @@ def process_upload(file_url, progress=gr.Progress()):
             request = service.files().create(
                 body=file_metadata,
                 media_body=media,
-                fields='id, webViewLink'
+                fields='id, webViewLink, size'
             )
             
-            # --- 4. 执行上传 ---
-            response_upload = None
-            while response_upload is None:
-                status, response_upload = request.next_chunk()
+            response_obj = None
+            while response_obj is None:
+                status, response_obj = request.next_chunk()
                 if status:
-                    progress_percent = int(status.progress() * 100)
-                    if progress_percent % 10 == 0:
-                        logger.info(f"⏳ 上传进度: {progress_percent}%")
+                    p = int(status.progress() * 100)
+                    if p % 10 == 0: logger.info(f"⏳ 上传进度: {p}%")
 
-            file = response_upload
+            file = response_obj
             file_id = file.get('id')
-            logger.info(f"✅ 上传完成，ID: {file_id}, 大小非0检查: 需去网盘确认")
+            uploaded_size = int(file.get('size', 0))
+            logger.info(f"✅ 上传完成，ID: {file_id}, 大小: {uploaded_size/1024/1024:.2f} MB")
             
-            # --- 5. 权限设置 ---
+            # --- 4. 权限设置 ---
             web_link = file.get('webViewLink', f"https://drive.google.com/file/d/{file_id}/view")
-            perm_msg = "🔒 私有"
+            perm_status = "🔒 私有"
             
             try:
-                progress(0.9, desc="🔓 设置权限...")
                 service.permissions().create(
                     fileId=file_id,
                     body={'role': 'reader', 'type': 'anyone'}
                 ).execute()
-                perm_msg = "🌍 公开"
-            except HttpError:
+                perm_status = "🌍 公开"
+            except Exception:
                 pass
 
             return f"""✅ **转存成功!**
             
 **文件名**: {filename}
-**状态**: {perm_msg}
-**文件ID**: {file_id}
-**链接**: [点击打开]({web_link})
+**实际大小**: {uploaded_size / 1024 / 1024:.2f} MB
+**状态**: {perm_status}
+**链接**: [Google Drive]({web_link})
 """
 
     except Exception as e:
         logger.error(f"❌ 错误: {e}", exc_info=True)
         return f"❌ **发生错误**: {str(e)}"
 
+# ---------------------------------------------------------
+# 3. 构建界面
+# ---------------------------------------------------------
 with gr.Blocks(title="URL to Drive Saver") as demo:
     gr.Markdown("# 🚀 URL to Google Drive Saver")
+    
     with gr.Row():
-        url_input = gr.Textbox(label="文件 URL")
+        url_input = gr.Textbox(label="文件 URL", placeholder="https://example.com/video.mp4")
         submit_btn = gr.Button("开始转存", variant="primary")
+    
     output_markdown = gr.Markdown(label="结果")
-    submit_btn.click(process_upload, inputs=url_input, outputs=output_markdown)
+
+    submit_btn.click(
+        fn=process_upload,
+        inputs=url_input,
+        outputs=output_markdown,
+        api_name="save_to_drive"
+    )
 
 if __name__ == "__main__":
     demo.queue().launch(server_name="0.0.0.0", show_api=True)
