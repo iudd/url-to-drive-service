@@ -5,10 +5,10 @@ colorFrom: blue
 colorTo: indigo
 sdk: gradio
 sdk_version: 4.44.1
-app_file: run.py
+app_file: app.py
 pinned: false
 ---
 
 # ☁️ URL to Drive Saver
 
-(自动运行鉴权测试模式)
+(正常运行模式)
