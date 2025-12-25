@@ -2,22 +2,22 @@ import os
 import requests
 import gradio as gr
 import logging
+import shutil
+import uuid
+import datetime
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 from urllib.parse import urlparse, unquote
-import uuid
-from datetime import datetime
-import shutil
 
 # ---------------------------------------------------------
 # 0. 配置日志
 # ---------------------------------------------------------
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------
-# 1. 辅助函数
+# 1. 工具函数
 # ---------------------------------------------------------
 def get_drive_service():
     client_id = os.environ.get("G_CLIENT_ID")
@@ -37,181 +37,187 @@ def get_drive_service():
     return build("drive", "v3", credentials=creds)
 
 def get_smart_filename(response, url):
-    # 1. 尝试从 Content-Disposition 获取文件名
+    # 1. 尝试从 Content-Disposition 获取
     content_disposition = response.headers.get("Content-Disposition")
     if content_disposition:
         import re
         fname = re.findall('filename="?([^"]+)"?', content_disposition)
         if fname:
             return unquote(fname[0])
-            
-    # 2. 从 URL 路径获取
+    
+    # 2. 尝试从 URL 路径获取
     parsed = urlparse(url)
     path_name = os.path.basename(unquote(parsed.path))
     
-    # 3. 如果路径名太乱（比如只是 'raw'），或者包含特殊字符，则加时间戳
-    if not path_name or len(path_name) < 3 or path_name.lower() == 'raw':
-        return f"video_{datetime.now().strftime('%Y%m%d_%H%M%S')}.mp4"
+    # 3. 智能回退：如果文件名无效，使用时间戳
+    if not path_name or len(path_name) < 3 or path_name.lower() in ['raw', 'blob', 'file', 'download', 'videoplayback']:
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        ext = ".mp4" # 默认假设 mp4，如果不确定
+        content_type = response.headers.get('Content-Type', '')
+        if 'image' in content_type: ext = ".jpg"
+        elif 'zip' in content_type: ext = ".zip"
+        return f"video_{timestamp}{ext}"
     
     return path_name
 
-def get_or_create_date_folder(service, root_folder_id):
+def get_or_create_date_folder(service, parent_id=None):
     """
-    在 root_folder_id 下查找或创建名为 'YYYY-MM-DD' 的文件夹
+    在 parent_id 下查找或创建名为 'YYYY-MM-DD' 的文件夹
     """
-    folder_name = datetime.now().strftime("%Y-%m-%d")
-    
-    # 搜索文件夹是否存在
+    folder_name = datetime.datetime.now().strftime("%Y-%m-%d")
     query = f"mimeType='application/vnd.google-apps.folder' and name='{folder_name}' and trashed=false"
-    if root_folder_id:
-        query += f" and '{root_folder_id}' in parents"
+    if parent_id:
+        query += f" and '{parent_id}' in parents"
     
+    # 查找
     results = service.files().list(q=query, fields="files(id)").execute()
     files = results.get('files', [])
-
+    
     if files:
-        logger.info(f"📂 找到现有日期文件夹: {folder_name} ({files[0]['id']})")
+        logger.info(f"📂 使用已有日期文件夹: {folder_name}")
         return files[0]['id']
     else:
-        # 创建新文件夹
-        file_metadata = {
+        # 创建
+        metadata = {
             'name': folder_name,
             'mimeType': 'application/vnd.google-apps.folder'
         }
-        if root_folder_id:
-            file_metadata['parents'] = [root_folder_id]
-            
-        file = service.files().create(body=file_metadata, fields='id').execute()
-        logger.info(f"✨ 创建新日期文件夹: {folder_name} ({file.get('id')})")
-        return file.get('id')
+        if parent_id:
+            metadata['parents'] = [parent_id]
+        
+        folder = service.files().create(body=metadata, fields='id').execute()
+        logger.info(f"📂 创建新日期文件夹: {folder_name}")
+        return folder['id']
 
 # ---------------------------------------------------------
-# 2. 核心处理逻辑
+# 2. 核心逻辑 (API版)
 # ---------------------------------------------------------
-def process_upload(file_url, access_pwd, progress=gr.Progress()):
-    # --- 0. 密码校验 ---
-    env_pwd = os.environ.get("API_PASSWORD", "")
-    if env_pwd and access_pwd != env_pwd:
-        logger.warning("❌ 访问拒绝: 密码错误")
-        return {"status": "error", "message": "❌ 密码错误，拒绝访问"}
+def process_upload_api(file_url, password, progress=gr.Progress()):
+    # --- 0. 密码验证 ---
+    correct_pass = os.environ.get("ACCESS_PASSWORD")
+    # 如果设置了环境变量 ACCESS_PASSWORD，则必须校验。没设置则允许公开调用。
+    if correct_pass and password != correct_pass:
+        return {"status": "error", "message": "❌ 401 Unauthorized: 密码错误"}
     
     if not file_url:
         return {"status": "error", "message": "❌ URL 为空"}
-    
-    temp_file_path = None
+
+    temp_path = None
     try:
+        # --- 1. 鉴权 ---
         service = get_drive_service()
 
-        # --- 1. 下载到本地 ---
-        logger.info(f"📥 开始下载: {file_url}")
-        progress(0, desc="🚀 正在连接...")
-        
+        # --- 2. 下载到本地 ---
+        progress(0.1, desc="🚀 连接资源...")
         with requests.get(file_url, stream=True, headers={'User-Agent': 'Mozilla/5.0'}) as response:
             response.raise_for_status()
             
             filename = get_smart_filename(response, file_url)
             total_size = int(response.headers.get('Content-Length', 0))
             
-            # 临时路径
-            temp_file_path = f"/tmp/{uuid.uuid4()}_{filename}"
+            temp_path = f"/tmp/{uuid.uuid4()}_{filename}"
+            logger.info(f"📥 下载到: {temp_path}")
             
-            with open(temp_file_path, 'wb') as f:
-                downloaded = 0
+            downloaded = 0
+            with open(temp_path, 'wb') as f:
                 for chunk in response.iter_content(chunk_size=1024*1024):
                     if chunk:
                         f.write(chunk)
                         downloaded += len(chunk)
                         if total_size > 0:
-                            progress((downloaded/total_size)*0.5, desc="📥 下载中...")
+                            progress((downloaded/total_size)*0.4, desc=f"📥 下载中... {int(downloaded/1024/1024)}MB")
 
-        local_size = os.path.getsize(temp_file_path)
-        if local_size == 0:
-            return {"status": "error", "message": "下载失败: 文件大小为 0"}
-
-        # --- 2. 准备上传目录 (日期文件夹) ---
-        root_folder_id = os.environ.get("GDRIVE_FOLDER_ID", "").strip()
+        # --- 3. 准备文件夹 ---
+        root_folder_id = os.environ.get("GDRIVE_FOLDER_ID", "").strip() or None
         target_folder_id = get_or_create_date_folder(service, root_folder_id)
 
-        # --- 3. 上传 ---
-        progress(0.5, desc="☁️ 正在上传到 Google Drive...")
+        # --- 4. 上传 ---
+        progress(0.5, desc="☁️ 上传到 Google Drive...")
+        metadata = {'name': filename, 'parents': [target_folder_id]}
         
-        file_metadata = {
-            'name': filename,
-            'parents': [target_folder_id]
-        }
+        media = MediaFileUpload(temp_path, resumable=True, chunksize=10*1024*1024)
         
-        media = MediaFileUpload(
-            temp_file_path,
-            resumable=True,
-            chunksize=10*1024*1024
-        )
-
         request = service.files().create(
-            body=file_metadata,
-            media_body=media,
-            fields='id, webContentLink, webViewLink, size'
+            body=metadata, media_body=media, fields='id, webContentLink, webViewLink, size'
         )
         
-        response_obj = None
-        while response_obj is None:
-            status, response_obj = request.next_chunk()
+        response = None
+        while response is None:
+            status, response = request.next_chunk()
             if status:
-                progress(0.5 + (0.5 * status.progress()), desc="☁️ 上传中...")
+                progress(0.5 + (status.progress()*0.5), desc=f"☁️ 上传中 {int(status.progress()*100)}%")
 
-        file_id = response_obj.get('id')
+        file_id = response.get('id')
         
-        # --- 4. 设置公开权限并获取链接 ---
+        # --- 5. 权限与链接 ---
         try:
             service.permissions().create(
-                fileId=file_id,
-                body={'role': 'reader', 'type': 'anyone'}
+                fileId=file_id, body={'role': 'reader', 'type': 'anyone'}
             ).execute()
-        except Exception: pass
-        
-        # 获取直链
-        web_content_link = response_obj.get('webContentLink', '') # 直链 (下载)
-        web_view_link = response_obj.get('webViewLink', '')       # 预览链 (观看)
+        except: pass
 
-        # 构造详细的返回信息
-        result = {
+        # webContentLink = 直链 (Direct Download)
+        # webViewLink = 预览链接
+        direct_link = response.get('webContentLink', '')
+        view_link = response.get('webViewLink', '')
+        
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+
+        return {
             "status": "success",
             "filename": filename,
+            "folder": datetime.datetime.now().strftime("%Y-%m-%d"),
             "file_id": file_id,
-            "folder": datetime.now().strftime("%Y-%m-%d"),
-            "size_mb": round(local_size / 1024 / 1024, 2),
-            "download_url": web_content_link,  # 👈 这是给 AI 用的直链
-            "view_url": web_view_link
+            "download_link": direct_link,
+            "view_link": view_link
         }
-        
-        return str(result) # 返回字符串给界面显示，API 调用方可以解析 JSON
 
     except Exception as e:
-        logger.error(f"❌ 错误: {e}", exc_info=True)
+        logger.error(f"❌: {e}", exc_info=True)
+        if temp_path and os.path.exists(temp_path):
+            try: os.remove(temp_path)
+            except: pass
         return {"status": "error", "message": str(e)}
-        
-    finally:
-        if temp_file_path and os.path.exists(temp_file_path):
-            os.remove(temp_file_path)
 
 # ---------------------------------------------------------
-# 3. 构建界面
+# 3. 界面包装器
+# ---------------------------------------------------------
+def ui_wrapper(url, pwd):
+    res = process_upload_api(url, pwd)
+    if res['status'] == 'success':
+        return (
+            f"✅ **成功!**\n\n"
+            f"📂 存入文件夹: `{res['folder']}`\n"
+            f"📄 文件名: `{res['filename']}`\n"
+            f"🔗 [预览链接]({res['view_link']})\n"
+            f"⬇️ [直接下载链接]({res['download_link']})\n"
+            f"*(注: 直链可供第三方程序调用)*"
+        )
+    else:
+        return f"❌ 失败: {res.get('message')}"
+
+# ---------------------------------------------------------
+# 4. 构建 App
 # ---------------------------------------------------------
 with gr.Blocks(title="URL to Drive Saver") as demo:
-    gr.Markdown("# 🚀 URL to Google Drive Saver (API Enabled)")
+    gr.Markdown("# 🚀 URL to Drive (API Ready)")
     
     with gr.Row():
-        url_input = gr.Textbox(label="文件 URL")
-        pwd_input = gr.Textbox(label="访问密码 (API Key)", type="password")
-        submit_btn = gr.Button("开始转存", variant="primary")
+        url_input = gr.Textbox(label="文件 URL", placeholder="https://example.com/video.raw?token=...")
+        pwd_input = gr.Textbox(label="访问密码 (环境变量 ACCESS_PASSWORD)", type="password")
+        submit_btn = gr.Button("🚀 开始转存", variant="primary")
     
-    # 输出改为 Textbox 以便复制，或者给 API 返回 JSON 字符串
-    output_json = gr.Textbox(label="执行结果 (JSON)", show_copy_button=True)
+    output = gr.Markdown(label="结果")
 
-    submit_btn.click(
-        fn=process_upload,
-        inputs=[url_input, pwd_input],
-        outputs=output_json,
-        api_name="save" # 👈 这个 api_name 很重要
+    submit_btn.click(ui_wrapper, inputs=[url_input, pwd_input], outputs=output)
+    
+    # 暴露 JSON API
+    api = gr.Interface(
+        fn=process_upload_api,
+        inputs=[gr.Textbox(label="url"), gr.Textbox(label="password")],
+        outputs="json",
+        api_name="upload"
     )
 
 if __name__ == "__main__":
