@@ -1,6 +1,6 @@
 ---
 title: URL to Drive Saver
-emoji: 🚀
+emoji: ☁️
 colorFrom: blue
 colorTo: indigo
 sdk: gradio
@@ -9,64 +9,55 @@ app_file: app.py
 pinned: false
 ---
 
-# 🚀 URL to Google Drive Saver (API Edition)
+# 🚀 URL to Google Drive Saver (API Ready)
 
-这是一个部署在 Hugging Face Space 上的全栈应用，用于将网络上的文件（视频、图片等）自动转存到您的 Google Drive。
+这个 Space 不仅可以通过网页界面使用，还可以作为 **API 微服务** 被其他 AI Agent 调用。
 
-## ✨ 核心特性
+## 🔐 配置
 
-- **日期归档**: 自动按日期 (`2024-01-01`) 创建子文件夹，整理文件。
-- **智能命名**: 自动解析文件名，如果 URL 是乱码或 raw，则使用时间戳命名。
-- **API 支持**: 提供受密码保护的 API 接口，可被其他 AI Agent 调用。
-- **OAuth 2.0**: 使用个人账号鉴权，无 Service Account 限制。
+请确保在 **Settings** -> **Repository secrets** 中设置了以下变量：
+- `ACCESS_PASSWORD`: 设置一个访问密码（API Key），防止他人滥用。
+- `G_REFRESH_TOKEN`, `G_CLIENT_ID`, `G_CLIENT_SECRET`: OAuth 凭据。
+- `GDRIVE_FOLDER_ID`: (可选) 根目录 ID。
 
----
+## 📅 功能特性
 
-## 🔐 环境变量配置
+- **自动日期归档**: 文件会自动存入 `YYYY-MM-DD` 格式的文件夹中。
+- **智能重命名**: 自动识别乱码 URL，防止文件名冲突。
+- **公开直链**: 返回 `webContentLink`，供下游程序直接下载。
 
-请在 Space 的 **Settings** -> **Repository secrets** 中设置：
+## 🤖 API 调用示例 (Python)
 
-| Secret Name | 说明 | 示例 |
-| :--- | :--- | :--- |
-| `G_CLIENT_ID` | OAuth Client ID | `xxx.apps.googleusercontent.com` |
-| `G_CLIENT_SECRET` | OAuth Client Secret | `GOCSPX-xxxx...` |
-| `G_REFRESH_TOKEN` | 您的刷新令牌 | `1//04Pq...` |
-| `ACCESS_PASSWORD` | **(新)** API 访问密码 | `sk-mysecret123` |
-| `GDRIVE_FOLDER_ID` | (可选) 根目录 ID | `1AbCdEf...` |
-
----
-
-## 🤖 API 调用指南
-
-您可以在任何 Python 程序中调用此服务：
+使用 `gradio_client` 库可以轻松调用此服务：
 
 ```python
 from gradio_client import Client
 
-# 1. 初始化客户端
-client = Client("https://iyougame-url2drive.hf.space")
+# 初始化客户端
+client = Client("iyougame/url2drive")
 
-# 2. 调用上传接口
+# 你的密码
+API_PASSWORD = "你的密码"
+
+# 调用上传
 result = client.predict(
-    "https://example.com/video.mp4",  # file_url
-    "sk-mysecret123",                 # password
-    api_name="/upload"
+    "https://example.com/video.mp4", # 文件 URL
+    API_PASSWORD,                    # 访问密码
+    api_name="/upload"               # API 端点名
 )
 
-# 3. 获取结果
+# 打印结果 (JSON 格式)
 print(result)
-# 返回示例:
-# {
-#   "status": "success",
-#   "filename": "video.mp4",
-#   "download_link": "https://drive.google.com/uc?id=...",
-#   "view_link": "https://drive.google.com/file/d/.../view"
-# }
 ```
 
----
-
-## 🛠️ 故障排除
-
-- **401 Unauthorized**: 检查 `ACCESS_PASSWORD` 是否匹配。
-- **0KB 文件**: 检查源链接是否有效，通常是因为源服务器拒绝了请求。
+**返回数据示例**:
+```json
+{
+  "status": "success",
+  "filename": "video_20231225.mp4",
+  "file_id": "1abcde...",
+  "download_link": "https://drive.google.com/uc?id=...",
+  "view_link": "https://drive.google.com/file/d/.../view",
+  "folder": "2023-12-25"
+}
+```
