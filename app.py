@@ -322,7 +322,7 @@ with gr.Blocks(title="URL to Drive Saver") as demo:
         inputs=[
             gr.Textbox(label="url"),
             gr.Textbox(label="password"),
-            gr.Textbox(label="username", default="")
+            gr.Textbox(label="username", value="")
         ],
         outputs="json",
         api_name="upload"
