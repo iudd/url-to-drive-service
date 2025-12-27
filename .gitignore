@@ -52,3 +52,11 @@ credentials.json
 # Temporary files
 *.tmp
 temp/
+
+# Internal documentation (contains sensitive info)
+API_REQUEST_TEMPLATE.md
+UPSTREAM_INTEGRATION.md
+UPDATE_SUMMARY.md
+test_new_features.py
+test_auth.py
+get_token.py
