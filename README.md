@@ -1,3 +1,14 @@
+---
+title: URL to Drive Saver
+emoji: ☁️
+colorFrom: blue
+colorTo: indigo
+sdk: gradio
+sdk_version: "4.44.1"
+app_file: app.py
+pinned: false
+---
+
 # 🚀 URL to Google Drive Saver (API Ready)
 
 这个 Space 不仅可以通过网页界面使用，还可以作为 **API 微服务** 被其他 AI Agent 调用。
@@ -21,7 +32,7 @@
 ### 有用户名时
 ```
 指定文件夹/
-└── xever121/                    # 用户文件夹
+└── user123/                     # 用户文件夹
     └── 2025-12-27/              # 日期文件夹
         └── s_xxx.mp4
 ```
@@ -40,7 +51,7 @@
 ```python
 from gradio_client import Client
 
-client = Client("iyougame/url2drive")
+client = Client("your-username/your-space-name")
 result = client.predict(
     "https://example.com/video.mp4",  # 文件 URL
     "your_password",                  # 访问密码
@@ -54,13 +65,13 @@ print(result)
 ```python
 from gradio_client import Client
 
-client = Client("iyougame/url2drive")
+client = Client("your-username/your-space-name")
 
 # 构造请求
 request = {
-    "url": "https://oscdn2.dyysy.com/MP4/s_xxx.mp4",
+    "url": "https://example.com/video.mp4",
     "password": "your_password",
-    "username": "xever121",           # 用户名（可选）
+    "username": "user123",            # 用户名（可选）
     "metadata": {                     # 元数据（可选）
         "post_id": "s_xxx",
         "user_id": "user-xxx"
@@ -85,8 +96,8 @@ if result["status"] == "success":
   "download_link": "https://drive.google.com/uc?id=...",
   "view_link": "https://drive.google.com/file/d/.../view",
   "folder": "2025-12-27",
-  "username": "xever121",
-  "folder_path": "xever121/2025-12-27"
+  "username": "user123",
+  "folder_path": "user123/2025-12-27"
 }
 ```
 
