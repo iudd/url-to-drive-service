@@ -13,7 +13,7 @@ jobs:
         run: pip install huggingface_hub
       - name: Upload all files via HF API (Batch Mode)
         env:
-          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_TOKEN: ${{ secrets.HF_TOKENl }}
         run: |
           python - <<EOF
           from huggingface_hub import HfApi, CommitOperationAdd
